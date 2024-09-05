@@ -1,0 +1,31 @@
+nuscenes:
+  version: v1.0-trainval
+  dataroot: ../../datasets/nuscenes/
+  verbose: True
+scenes:
+  - scene-0001
+  - scene-0002
+  - scene-0003
+  - scene-0004
+  - scene-0005
+cams:
+  - CAM_FRONT
+  - CAM_FRONT_RIGHT
+  - CAM_BACK_RIGHT
+  - CAM_BACK
+  - CAM_BACK_LEFT
+  - CAM_FRONT_LEFT
+image_size:
+  input:
+    width: 1600
+    height: 900
+  output:
+    width: 1600
+    height: 900
+layout:
+  rows: 2
+  cols: 3
+output:
+  dirname: output
+  filename: nuscenes_seq
+  fps: 2

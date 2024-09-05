@@ -318,3 +318,20 @@ class VFDepthAlgo(BaseModel):
         """                  
         rel_pose_dict = self.pose.compute_relative_cam_poses(inputs, outputs, cam)
         self.view_rendering(inputs, outputs, cam, rel_pose_dict)  
+
+
+class VFDepthWrapper:
+    def __init__(self, model: VFDepthAlgo):
+        self.model = model
+
+    def __call__(self, inputs):
+        return self.model.process_batch(inputs, rank=0)
+
+    def to(self, *args):
+        pass
+
+    def train(self):
+        self.model.set_train()
+
+    def eval(self):
+        self.model.set_val()
