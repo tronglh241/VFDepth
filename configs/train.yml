@@ -75,6 +75,14 @@ metrics:
 #         gamma: 0.8
 #   event: Events.EPOCH_COMPLETED
 
+visualizer:
+  module: handlers.visualizer
+  name: Visualizer
+  kwargs:
+    trainer: engine
+    evaluator: evaluators.valid
+    out_dir: "'output/vis'"
+
 logging:
   progress_bar:
     module: flame.handlers
@@ -181,7 +189,6 @@ logging:
 
 extralibs:
   utils: utils
-  # transforms: torchvision.transforms
   Events:
     module: ignite.engine
     name: Events
