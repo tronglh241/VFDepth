@@ -50,22 +50,16 @@ if __name__ == '__main__':
 
         axis_angle, translation = model.pose_net(cur_image, next_image, mask, intrinsic, extrinsic)
         cam_T_cam = vec_to_matrix(axis_angle[:, 0], translation[:, 0], invert=(f_i < 0))
-        exts = inv_extrinsic
-        exts_inv = extrinsic
-        ref_ext = exts[:, 0, ...]
-        ref_ext_inv = exts_inv[:, 0, ...]
 
-        ref_T = cam_T_cam
-        cam_T_cams = []
-        for cam in range(6):
-            cur_ext = exts[:, cam, ...]
-            cur_ext_inv = exts_inv[:, cam, ...]
-            cur_T = cur_ext_inv @ ref_ext @ ref_T @ ref_ext_inv @ cur_ext
-            cam_T_cams.append(cur_T)
+        ref_extrinsic = extrinsic[:, :1, ...]
+        ref_inv_extrinsic = inv_extrinsic[:, :1, ...]
+        cam_T_cams_2 = model.pose_net.compute_poses(
+            axis_angle, translation, (f_i < 0),
+            ref_extrinsic, ref_inv_extrinsic, extrinsic, inv_extrinsic,
+        )
 
-        # compare org_cam_T_cams and cam_T_cams
-        for org_T, T in zip(org_cam_T_cams, cam_T_cams):
-            print(torch.all(torch.abs(org_T - T) < 1e-9))
+        for i in range(6):
+            print(torch.all(torch.abs(org_cam_T_cams[i] - cam_T_cams_2[:, i]) < 1e-9))
 
         # Depth
         images = sample[('color_aug', 0, 0)]

@@ -3,6 +3,7 @@ import torch.nn.functional as F
 from torch import nn
 
 from external.layers import PoseDecoder, ResnetEncoder
+from models.geometry.geometry_util import vec_to_matrix
 from models.vf_depth.vf_net import PoseVFNet
 from network.blocks import conv2d, pack_cam_feat, unpack_cam_feat
 
@@ -79,3 +80,25 @@ class FusedPoseNet(nn.Module):
         )
         axis_angle, translation = self.decoder([[bev_feat]])
         return axis_angle, torch.clamp(translation, -4.0, 4.0)  # for DDAD dataset
+
+    def compute_pose(
+        self,
+        axis_angle,
+        translation,
+        invert=False,
+    ):
+        return vec_to_matrix(axis_angle[:, 0], translation[:, 0], invert=invert)
+
+    def compute_poses(
+        self,
+        axis_angle,
+        translation,
+        invert,
+        ref_extrinsic,
+        ref_inv_extrinsic,
+        extrinsic,
+        inv_extrinsic,
+    ):
+        ref_T = self.compute_pose(axis_angle, translation, invert)
+        poses = extrinsic @ ref_inv_extrinsic @ ref_T.unsqueeze(1) @ ref_extrinsic @ inv_extrinsic
+        return poses
