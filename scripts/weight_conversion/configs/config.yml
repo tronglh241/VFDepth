@@ -1,0 +1,4 @@
+org_model_config: ./configs/nuscenes/nusc_surround_fusion.yaml
+output:
+  dirname: output/weights
+  filename: vfdepth
