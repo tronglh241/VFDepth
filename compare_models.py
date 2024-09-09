@@ -4,6 +4,7 @@ import utils
 from models import VFDepthAlgo
 from models.vf_depth.vf_depth import VFDepth
 from models.geometry.geometry_util import vec_to_matrix
+from utils.misc import get_relcam, _NUSC_CAM_LIST
 
 
 if __name__ == '__main__':
@@ -19,51 +20,95 @@ if __name__ == '__main__':
     model.eval()
 
     dataset = org_model.train_dataloader()
-    sample = next(iter(dataset))
-
-    model.pose_net.encoder.load_state_dict(org_model.models['pose_net'].encoder.state_dict())
-    model.pose_net.conv1x1.load_state_dict(org_model.models['pose_net'].conv1x1.state_dict())
-    model.pose_net.fusion_net.load_state_dict(org_model.models['pose_net'].fusion_net.state_dict())
-    model.pose_net.decoder.load_state_dict(org_model.models['pose_net'].pose_decoder.state_dict())
-
-    model.depth_net.encoder.load_state_dict(org_model.models['depth_net'].encoder.state_dict())
-    model.depth_net.conv1x1.load_state_dict(org_model.models['depth_net'].conv1x1.state_dict())
-    model.depth_net.fusion_net.load_state_dict(org_model.models['depth_net'].fusion_net.state_dict())
-    model.depth_net.decoder.load_state_dict(org_model.models['depth_net'].decoder.state_dict())
+    inputs = next(iter(dataset))
 
     with torch.no_grad():
-        # Pose
-        f_i = 1
-        outputs, _ = org_model.process_batch(sample, 0)
-        org_cam_T_cams = [outputs['cam', cam]['cam_T_cam', 0, f_i] for cam in range(6)]
-
-        frame_ids = [0, 1]
-        cur_image = sample[('color_aug', frame_ids[0], 0)]
-        next_image = sample[('color_aug', frame_ids[1], 0)]
-
+        outputs, _ = org_model.process_batch(inputs, 0)
+        prev_image = inputs[('color_aug', -1, 0)]
+        cur_image = inputs[('color_aug', 0, 0)]
+        next_image = inputs[('color_aug', 1, 0)]
         fusion_level = 2
-        mask = sample['mask']
-        intrinsic = sample['K', fusion_level + 1]
-        inv_intrinsic = sample['inv_K', fusion_level + 1]
-        extrinsic = sample['extrinsics_inv']
-        inv_extrinsic = sample['extrinsics']
-
-        axis_angle, translation = model.pose_net(cur_image, next_image, mask, intrinsic, extrinsic)
-        cam_T_cam = vec_to_matrix(axis_angle[:, 0], translation[:, 0], invert=(f_i < 0))
-
+        mask = inputs['mask']
+        intrinsic = inputs['K', fusion_level + 1]
+        inv_intrinsic = inputs['inv_K', fusion_level + 1]
+        extrinsic = inputs['extrinsics_inv']
+        inv_extrinsic = inputs['extrinsics']
         ref_extrinsic = extrinsic[:, :1, ...]
         ref_inv_extrinsic = inv_extrinsic[:, :1, ...]
-        cam_T_cams_2 = model.pose_net.compute_poses(
-            axis_angle, translation, (f_i < 0),
-            ref_extrinsic, ref_inv_extrinsic, extrinsic, inv_extrinsic,
+
+        ######################################################################################
+        prev_to_cur_poses, next_to_cur_poses, depth_maps = model(
+            prev_image,
+            cur_image,
+            next_image,
+            mask,
+            intrinsic,
+            extrinsic,
+            inv_intrinsic,
+            inv_extrinsic,
+            ref_extrinsic,
+            ref_inv_extrinsic,
+        )
+        print(f'prev_image: {prev_image.shape}')
+        print(f'cur_image: {cur_image.shape}')
+        print(f'next_image: {next_image.shape}')
+        print(f'mask: {mask.shape}')
+        print(f'intrinsic: {intrinsic.shape}')
+        print(f'extrinsic: {extrinsic.shape}')
+        print(f'inv_intrinsic: {inv_intrinsic.shape}')
+        print(f'inv_extrinsic: {inv_extrinsic.shape}')
+        print(f'ref_extrinsic: {ref_extrinsic.shape}')
+        print(f'ref_inv_extrinsic: {ref_inv_extrinsic.shape}')
+        print(f'prev_to_cur_poses: {prev_to_cur_poses.shape}')
+        print(f'next_to_cur_poses: {next_to_cur_poses.shape}')
+        print(f'depth_maps: {depth_maps.shape}')
+
+        org_cam_T_cams = [outputs['cam', cam]['cam_T_cam', 0, -1] for cam in range(6)]
+
+        for cam in range(6):
+            assert torch.all(torch.abs(org_cam_T_cams[cam] - prev_to_cur_poses[:, cam]) < 1e-9)
+
+        org_cam_T_cams = [outputs['cam', cam]['cam_T_cam', 0, 1] for cam in range(6)]
+
+        for cam in range(6):
+            assert torch.all(torch.abs(org_cam_T_cams[cam] - next_to_cur_poses[:, cam]) < 1e-9)
+
+        for cam in range(6):
+            assert torch.all(abs(depth_maps[:, cam] - outputs[('cam', cam)]['disp', 0]) < 1e-9)
+        ######################################################################################
+
+        for cam in range(6):
+            org_rel_pose_dict = org_model.pose.compute_relative_cam_poses(inputs, outputs, cam)
+
+            cam_prev_to_cur_pose = prev_to_cur_poses[:, cam]
+            cam_next_to_cur_pose = next_to_cur_poses[:, cam]
+            cam_inv_extrinsic = inv_extrinsic[:, cam]
+            neighbor_cam_indices = get_relcam(_NUSC_CAM_LIST)[cam]
+            relative_poses = model.compute_relative_poses(
+                cam_prev_to_cur_pose,
+                cam_next_to_cur_pose,
+                cam_inv_extrinsic,
+                extrinsic,
+                neighbor_cam_indices,
+            )
+
+            assert len(org_rel_pose_dict) == len(relative_poses)
+            for key in org_rel_pose_dict:
+                assert torch.all(abs(org_rel_pose_dict[key] - relative_poses[key]) < 1e-9)
+        ######################################################################################
+
+        max_depth = 80.0
+        min_depth = 1.5
+        focal_length_scale = 300.0
+        full_resolution_intrinsic = inputs['K', 0]
+        true_depth_maps = model.compute_true_depth_maps(
+            depth_maps,
+            full_resolution_intrinsic,
+            max_depth,
+            min_depth,
+            focal_length_scale,
         )
 
-        for i in range(6):
-            print(torch.all(torch.abs(org_cam_T_cams[i] - cam_T_cams_2[:, i]) < 1e-9))
-
-        # Depth
-        images = sample[('color_aug', 0, 0)]
-        depth_maps = model.depth_net(images, mask, intrinsic, inv_intrinsic, extrinsic, inv_extrinsic)
-
-        for i in range(6):
-            print(torch.all(abs(depth_maps[:, i] - outputs[('cam', i)]['disp', 0]) < 1e-9))
+        for cam in range(6):
+            assert torch.all(abs(outputs[('cam', cam)][('depth', 0)] - true_depth_maps[:, cam]) < 1e-9)
+        ######################################################################################

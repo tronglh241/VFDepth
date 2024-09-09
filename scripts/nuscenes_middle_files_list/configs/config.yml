@@ -1,0 +1,9 @@
+nuscenes:
+  version: v1.0-mini
+  dataroot: ../VFDepth/input_data/nuscenes/
+  verbose: True
+scenes:
+  - mini_train
+output:
+  dirname: output
+  filename: mini

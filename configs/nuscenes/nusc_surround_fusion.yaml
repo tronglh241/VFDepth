@@ -26,8 +26,8 @@ model:
   proj_d_end: 50
 
 data:
-  data_path: './input_data/nuscenes/'
-  log_dir: './results/'
+  data_path: '../VFDepth/input_data/nuscenes/'
+  log_dir: '../VFDepth/results/'
   dataset: 'nuscenes'
   back_context: 1
   forward_context: 1
@@ -87,8 +87,8 @@ eval:
   
 load:
   pretrain: False
-  weights: 'weights_4'
-  models_to_load: ['depth_net']
+  weights: 'weights_9'
+  models_to_load: ['depth_net', 'pose_net']
   
 logging:
   early_phase: 2000

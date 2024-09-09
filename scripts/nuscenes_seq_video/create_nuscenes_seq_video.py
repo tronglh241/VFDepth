@@ -5,7 +5,7 @@ import cv2
 import numpy as np
 import yaml
 from nuscenes.nuscenes import NuScenes
-from nuscenes.utils.splits import train, val
+from nuscenes.utils.splits import mini_train, mini_val, train, val
 from tqdm import tqdm, trange
 
 if __name__ == '__main__':
@@ -37,6 +37,10 @@ if __name__ == '__main__':
             scene_names = train
         elif scene_names[0] == 'val':
             scene_names = val
+        elif scene_names[0] == 'mini_train':
+            scene_names = mini_train
+        elif scene_names[0] == 'mini_val':
+            scene_names = mini_val
 
     scenes = [scene for scene in dataset.scene if scene['name'] in scene_names]
 
