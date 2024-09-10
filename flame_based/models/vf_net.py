@@ -4,7 +4,7 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
-from network.blocks import conv1d, conv2d, pack_cam_feat
+from .blocks import conv1d, conv2d, pack_cam_feat
 
 
 class VFNet(nn.Module):

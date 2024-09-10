@@ -1,11 +1,37 @@
 import torch
 import torch.nn.functional as F
+from pytorch3d.transforms import axis_angle_to_matrix
 from torch import nn
 
-from external.layers import PoseDecoder, ResnetEncoder
-from models.geometry.geometry_util import vec_to_matrix
-from models.vf_depth.vf_net import PoseVFNet
-from network.blocks import conv2d, pack_cam_feat, unpack_cam_feat
+from .blocks import conv2d, pack_cam_feat, unpack_cam_feat
+from .pose_decoder import PoseDecoder
+from .resnet_encoder import ResnetEncoder
+from .vf_net import PoseVFNet
+
+
+def vec_to_matrix(rot_angle, trans_vec, invert=False):
+    """
+    This function transforms rotation angle and translation vector into 4x4 matrix.
+    """
+    # initialize matrices
+    b, _, _ = rot_angle.shape
+    R_mat = torch.eye(4).repeat([b, 1, 1]).to(device=rot_angle.device)
+    T_mat = torch.eye(4).repeat([b, 1, 1]).to(device=rot_angle.device)
+
+    R_mat[:, :3, :3] = axis_angle_to_matrix(rot_angle).squeeze(1)
+    t_vec = trans_vec.clone().contiguous().view(-1, 3, 1)
+
+    if invert:
+        R_mat = R_mat.transpose(1, 2)
+        t_vec = -1 * t_vec
+
+    T_mat[:, :3, 3:] = t_vec
+
+    if invert:
+        P_mat = torch.matmul(R_mat, T_mat)
+    else:
+        P_mat = torch.matmul(T_mat, R_mat)
+    return P_mat
 
 
 class FusedPoseNet(nn.Module):

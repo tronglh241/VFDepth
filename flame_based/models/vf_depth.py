@@ -2,8 +2,8 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
-from models.vf_depth.fused_depth_net import FusedDepthNet
-from models.vf_depth.fused_pose_net import FusedPoseNet
+from .fused_depth_net import FusedDepthNet
+from .fused_pose_net import FusedPoseNet
 
 
 class VFDepth(nn.Module):

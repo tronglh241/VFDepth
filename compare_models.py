@@ -1,11 +1,10 @@
 import torch
 
 import utils
+from flame_based.datasets.nuscenes_dataset import NuScenesDataset
+from flame_based.models.vf_depth import VFDepth
 from models import VFDepthAlgo
-from models.vf_depth.vf_depth import VFDepth
-from models.geometry.geometry_util import vec_to_matrix
-from utils.misc import get_relcam, _NUSC_CAM_LIST
-
+from utils.misc import _NUSC_CAM_LIST, get_relcam
 
 if __name__ == '__main__':
     cfg = utils.get_config('./configs/nuscenes/nusc_surround_fusion.yaml', mode='train')
@@ -112,3 +111,29 @@ if __name__ == '__main__':
         for cam in range(6):
             assert torch.all(abs(outputs[('cam', cam)][('depth', 0)] - true_depth_maps[:, cam]) < 1e-9)
         ######################################################################################
+
+    ##########################################################################################
+    org_dataset = org_model._dataloaders['val'].dataset
+    dataset = NuScenesDataset(
+        version='v1.0-mini',
+        dataroot='../VFDepth/input_data/nuscenes/',
+        verbose=True,
+        token_list_file='./dataset/nuscenes/val.txt',
+        mask_dir='./dataset/nuscenes_mask',
+        mode='train',
+        image_shape=(640, 352),
+        jittering=(0.0, 0.0, 0.0, 0.0),
+        crop_train_borders=(),
+        crop_eval_borders=(),
+        ref_extrinsic_idx=0,
+    )
+
+    org_sample = org_dataset[0]
+    prev_images, cur_images, next_images, masks, intrinsics, extrinsics, ref_extrinsic = dataset[0]
+
+    assert torch.all(abs(org_sample['color_aug', 0, 0] - cur_images) < 1e-9)
+    assert torch.all(abs(org_sample['color_aug', -1, 0] - prev_images) < 1e-9)
+    assert torch.all(abs(org_sample['color_aug', 1, 0] - next_images) < 1e-9)
+    assert torch.all(abs(org_sample['mask'] - masks) < 1e-9)
+    assert torch.all(abs(torch.from_numpy(org_sample['K', 0]) - intrinsics) < 1e-9)
+    assert torch.all(abs(torch.from_numpy(org_sample['extrinsics']) - extrinsics) < 1e-9)

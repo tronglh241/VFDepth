@@ -4,9 +4,9 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
-from external.layers import ResnetEncoder
-from models.vf_depth.vf_net import DepthVFNet
-from network.blocks import conv2d, pack_cam_feat, unpack_cam_feat, upsample
+from .blocks import conv2d, pack_cam_feat, unpack_cam_feat, upsample
+from .resnet_encoder import ResnetEncoder
+from .vf_net import DepthVFNet
 
 
 class DepthDecoder(nn.Module):
