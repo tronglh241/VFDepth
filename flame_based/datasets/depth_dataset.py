@@ -46,7 +46,7 @@ class DepthDataset(Dataset):
         intrinsics_tensor = torch.stack([torch.eye(4) for _ in intrinsics])
         intrinsics_tensor[:, :3, :3] = torch.from_numpy(np.stack(intrinsics))
 
-        ref_extrinsic = extrinsics[ref_extrinsic_idx]
+        ref_extrinsic = extrinsics_tensor[ref_extrinsic_idx:ref_extrinsic_idx + 1]
 
         return prev_images, cur_images, next_images, masks, intrinsics_tensor, extrinsics_tensor, ref_extrinsic
 

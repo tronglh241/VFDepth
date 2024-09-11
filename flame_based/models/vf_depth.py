@@ -7,10 +7,11 @@ from .fused_pose_net import FusedPoseNet
 
 
 class VFDepth(nn.Module):
-    def __init__(self):
+    def __init__(self, fusion_level: int = 2):
         super(VFDepth, self).__init__()
-        self.pose_net = FusedPoseNet()
-        self.depth_net = FusedDepthNet()
+        self.pose_net = FusedPoseNet(fusion_level=fusion_level)
+        self.depth_net = FusedDepthNet(fusion_level=fusion_level)
+        self.fusion_level = fusion_level
 
     def forward(
         self,
@@ -20,10 +21,7 @@ class VFDepth(nn.Module):
         mask,
         intrinsic,
         extrinsic,
-        inv_intrinsic,
-        inv_extrinsic,
         ref_extrinsic,
-        ref_inv_extrinsic,
     ):
         # prev_image (batch_size, num_cams, 3, height, width)
         # cur_image (batch_size, num_cams, 3, height, width)
@@ -31,10 +29,14 @@ class VFDepth(nn.Module):
         # mask (batch_size, num_cams, 1, height, width)
         # intrinsic (batch_size, num_cams, 4, 4)
         # extrinsic (batch_size, num_cams, 4, 4)
-        # inv_intrinsic (batch_size, num_cams, 4, 4)
-        # inv_extrinsic (batch_size, num_cams, 4, 4)
         # ref_extrinsic (batch_size, 1, 4, 4)
-        # ref_inv_extrinsic (batch_size, 1, 4, 4)
+
+        intrinsic = intrinsic.clone()
+        intrinsic[:, :, :2] /= (2 ** (self.fusion_level + 1))
+
+        inv_intrinsic = torch.inverse(intrinsic)
+        inv_extrinsic = torch.inverse(extrinsic)
+        ref_inv_extrinsic = torch.inverse(ref_extrinsic)
 
         # Previous image to current image pose estimation
         axis_angle, translation = self.pose_net(prev_image, cur_image, mask, intrinsic, extrinsic)

@@ -1,0 +1,110 @@
+data:
+  test:
+    module: torch.utils.data
+    name: DataLoader
+    kwargs:
+      dataset:
+        module: datasets.nuscenes_dataset
+        name: NuScenesDataset
+        kwargs:
+          version: "'v1.0-mini'"
+          dataroot: "'../../VFDepth/input_data/nuscenes/'"
+          verbose: True
+          token_list_file: "'../dataset/nuscenes/val.txt'"
+          mask_dir: "'../dataset/nuscenes_mask'"
+          mode: "'train'"
+          image_shape: (640, 352)
+          jittering: (0.0, 0.0, 0.0, 0.0)
+          crop_train_borders: ()
+          crop_eval_borders: ()
+          ref_extrinsic_idx: 0
+      shuffle: False
+      batch_size: 1
+
+model:
+  module: models.vf_depth
+  name: VFDepth
+
+engine:
+  module: flame.engine
+  name: Evaluator.factory
+  kwargs:
+    model: model
+    data: data.test
+    device: "'cuda'"
+    prepare_batch: prepare_batch
+    model_fn: 'lambda model, x: model(x[0], x[1], x[2], x[3], x[4], x[5], x[8])'
+
+# metrics:
+#   module: flame.handlers
+#   name: Metrics
+#   kwargs:
+#     evaluators:
+#       - engine
+#     metrics:
+#       accuracy:
+#         module: ignite.metrics
+#         name: Accuracy
+#       precision:
+#         module: ignite.metrics
+#         name: Precision
+#         kwargs:
+#           average: True
+
+visualization:
+  module: handlers.visualizer
+  name: Visualizer
+  kwargs:
+    trainer: engine
+    evaluator: engine
+    out_dir: "'./output'"
+    out_name: "'vis'"
+    out_resolution: (1472, 1080)
+    fps: 2
+    file_ext: "'mp4'"
+    fourcc: "'mp4v'"
+    grid_nrow: 3
+    output_transform: 'lambda x: (x[0][2], x[2])'
+
+logging:
+  progress_bar:
+    module: flame.handlers
+    name: ProgressBar
+    kwargs:
+      evaluators:
+        test: engine
+
+  # tensorboard:
+  #   module: flame.handlers
+  #   name: Tensorboard
+  #   kwargs:
+  #     log_dir: "'logs/'"
+  #     logger_handlers:
+  #       - engine: engine
+  #         event_name: Events.EPOCH_COMPLETED
+  #         log_handler:
+  #           module: ignite.contrib.handlers.tensorboard_logger
+  #           name: OutputHandler
+  #           kwargs:
+  #             tag: "'evaluation/test'"
+  #             metric_names: "'all'"
+  #             global_step_transform: global_step_from_engine(engine, Events.EPOCH_COMPLETED)
+
+checkpoint:
+  loader:
+    module: flame.handlers
+    name: CheckpointLoader
+    kwargs:
+      path: "'../output/weights/vfdepth.pt'"
+
+extralibs:
+  # transforms: torchvision.transforms
+  prepare_batch:
+    module: utils
+    name: prepare_batch
+  Events:
+    module: ignite.engine
+    name: Events
+  global_step_from_engine:
+    module: ignite.handlers
+    name: global_step_from_engine

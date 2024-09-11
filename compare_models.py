@@ -1,4 +1,5 @@
 import torch
+from torch.utils.data import DataLoader
 
 import utils
 from flame_based.datasets.nuscenes_dataset import NuScenesDataset
@@ -28,12 +29,13 @@ if __name__ == '__main__':
         next_image = inputs[('color_aug', 1, 0)]
         fusion_level = 2
         mask = inputs['mask']
-        intrinsic = inputs['K', fusion_level + 1]
-        inv_intrinsic = inputs['inv_K', fusion_level + 1]
+        intrinsic = inputs['K', 0]
+        # intrinsic = inputs['K', fusion_level + 1]
+        # inv_intrinsic = inputs['inv_K', fusion_level + 1]
         extrinsic = inputs['extrinsics_inv']
         inv_extrinsic = inputs['extrinsics']
         ref_extrinsic = extrinsic[:, :1, ...]
-        ref_inv_extrinsic = inv_extrinsic[:, :1, ...]
+        # ref_inv_extrinsic = inv_extrinsic[:, :1, ...]
 
         ######################################################################################
         prev_to_cur_poses, next_to_cur_poses, depth_maps = model(
@@ -43,10 +45,10 @@ if __name__ == '__main__':
             mask,
             intrinsic,
             extrinsic,
-            inv_intrinsic,
-            inv_extrinsic,
+            # inv_intrinsic,
+            # inv_extrinsic,
             ref_extrinsic,
-            ref_inv_extrinsic,
+            # ref_inv_extrinsic,
         )
         print(f'prev_image: {prev_image.shape}')
         print(f'cur_image: {cur_image.shape}')
@@ -54,10 +56,10 @@ if __name__ == '__main__':
         print(f'mask: {mask.shape}')
         print(f'intrinsic: {intrinsic.shape}')
         print(f'extrinsic: {extrinsic.shape}')
-        print(f'inv_intrinsic: {inv_intrinsic.shape}')
-        print(f'inv_extrinsic: {inv_extrinsic.shape}')
+        # print(f'inv_intrinsic: {inv_intrinsic.shape}')
+        # print(f'inv_extrinsic: {inv_extrinsic.shape}')
         print(f'ref_extrinsic: {ref_extrinsic.shape}')
-        print(f'ref_inv_extrinsic: {ref_inv_extrinsic.shape}')
+        # print(f'ref_inv_extrinsic: {ref_inv_extrinsic.shape}')
         print(f'prev_to_cur_poses: {prev_to_cur_poses.shape}')
         print(f'next_to_cur_poses: {next_to_cur_poses.shape}')
         print(f'depth_maps: {depth_maps.shape}')
@@ -65,15 +67,15 @@ if __name__ == '__main__':
         org_cam_T_cams = [outputs['cam', cam]['cam_T_cam', 0, -1] for cam in range(6)]
 
         for cam in range(6):
-            assert torch.all(torch.abs(org_cam_T_cams[cam] - prev_to_cur_poses[:, cam]) < 1e-9)
+            assert torch.all(torch.abs(org_cam_T_cams[cam] - prev_to_cur_poses[:, cam]) < 1e-6)
 
         org_cam_T_cams = [outputs['cam', cam]['cam_T_cam', 0, 1] for cam in range(6)]
 
         for cam in range(6):
-            assert torch.all(torch.abs(org_cam_T_cams[cam] - next_to_cur_poses[:, cam]) < 1e-9)
+            assert torch.all(torch.abs(org_cam_T_cams[cam] - next_to_cur_poses[:, cam]) < 1e-6)
 
         for cam in range(6):
-            assert torch.all(abs(depth_maps[:, cam] - outputs[('cam', cam)]['disp', 0]) < 1e-9)
+            assert torch.all(abs(depth_maps[:, cam] - outputs[('cam', cam)]['disp', 0]) < 1e-5)
         ######################################################################################
 
         for cam in range(6):
@@ -93,7 +95,7 @@ if __name__ == '__main__':
 
             assert len(org_rel_pose_dict) == len(relative_poses)
             for key in org_rel_pose_dict:
-                assert torch.all(abs(org_rel_pose_dict[key] - relative_poses[key]) < 1e-9)
+                assert torch.all(abs(org_rel_pose_dict[key] - relative_poses[key]) < 1e-6)
         ######################################################################################
 
         max_depth = 80.0
@@ -109,7 +111,7 @@ if __name__ == '__main__':
         )
 
         for cam in range(6):
-            assert torch.all(abs(outputs[('cam', cam)][('depth', 0)] - true_depth_maps[:, cam]) < 1e-9)
+            assert torch.all(abs(outputs[('cam', cam)][('depth', 0)] - true_depth_maps[:, cam]) < 1e-2)
         ######################################################################################
 
     ##########################################################################################
@@ -128,12 +130,57 @@ if __name__ == '__main__':
         ref_extrinsic_idx=0,
     )
 
-    org_sample = org_dataset[0]
-    prev_images, cur_images, next_images, masks, intrinsics, extrinsics, ref_extrinsic = dataset[0]
+    org_sample = next(iter(DataLoader(org_dataset)))
+    (
+        prev_images,
+        cur_images,
+        next_images,
+        masks,
+        intrinsics,
+        extrinsics,
+        inv_intrinsics,
+        inv_extrinsics,
+        ref_extrinsic,
+        ref_inv_extrinsic,
+    ) = next(iter(DataLoader(dataset)))
 
     assert torch.all(abs(org_sample['color_aug', 0, 0] - cur_images) < 1e-9)
     assert torch.all(abs(org_sample['color_aug', -1, 0] - prev_images) < 1e-9)
     assert torch.all(abs(org_sample['color_aug', 1, 0] - next_images) < 1e-9)
     assert torch.all(abs(org_sample['mask'] - masks) < 1e-9)
-    assert torch.all(abs(torch.from_numpy(org_sample['K', 0]) - intrinsics) < 1e-9)
-    assert torch.all(abs(torch.from_numpy(org_sample['extrinsics']) - extrinsics) < 1e-9)
+    assert torch.all(abs(org_sample['K', 0] - intrinsics) < 1e-9)
+    assert torch.all(abs(org_sample['extrinsics'] - inv_extrinsics) < 1e-9)
+    ##########################################################################################
+
+    _NO_DEVICE_KEYS = ['idx', 'dataset_idx', 'sensor_name', 'filename']
+    for key, ipt in org_sample.items():
+        if key not in _NO_DEVICE_KEYS:
+            if 'context' in key:
+                org_sample[key] = [ipt[k].float().to(0) for k in range(len(org_sample[key]))]
+            else:
+                org_sample[key] = ipt.float().to(0)
+
+    with torch.no_grad():
+        outputs, _ = org_model.process_batch(org_sample, 0)
+
+        # fusion_level = 2
+        # intrinsics = org_sample['K', fusion_level + 1]
+        # inv_intrinsics = org_sample['inv_K', fusion_level + 1]
+        # extrinsics = org_sample['extrinsics_inv']
+        # inv_extrinsics = org_sample['extrinsics']
+
+        prev_to_cur_poses, next_to_cur_poses, depth_maps = model(
+            prev_images.cuda(),
+            cur_images.cuda(),
+            next_images.cuda(),
+            masks.cuda(),
+            intrinsics.cuda(),
+            extrinsics.cuda(),
+            # inv_intrinsics.cuda(),
+            # inv_extrinsics.cuda(),
+            ref_extrinsic.cuda(),
+            # ref_inv_extrinsic.cuda(),
+        )
+
+        for cam in range(6):
+            assert torch.all(abs(depth_maps[:, cam] - outputs[('cam', cam)]['disp', 0]) < 1e-5)

@@ -2,6 +2,7 @@ from pathlib import Path
 from typing import List, Tuple
 
 import numpy as np
+import torch
 from nuscenes.nuscenes import NuScenes
 from PIL import Image
 from pyquaternion import Quaternion
@@ -158,7 +159,10 @@ class NuScenesDataset(DepthDataset):
             intrinsics.append(intrinsic)
             extrinsics.append(extrinsic)
 
-        return super(NuScenesDataset, self).__getitem__(
+        (
+            prev_images, cur_images, next_images, masks,
+            intrinsics, extrinsics, ref_extrinsic,
+        ) = super(NuScenesDataset, self).__getitem__(
             prev_image_files=prev_image_files,
             cur_image_files=cur_image_files,
             next_image_files=next_image_files,
@@ -166,4 +170,25 @@ class NuScenesDataset(DepthDataset):
             intrinsics=intrinsics,
             extrinsics=extrinsics,
             ref_extrinsic_idx=self.ref_extrinsic_idx,
+        )
+
+        inv_intrinsics = torch.inverse(intrinsics)
+
+        # nuScenes only
+        inv_extrinsics = extrinsics
+        extrinsics = torch.inverse(inv_extrinsics)
+        ref_inv_extrinsic = ref_extrinsic
+        ref_extrinsic = torch.inverse(ref_inv_extrinsic)
+
+        return (
+            prev_images,
+            cur_images,
+            next_images,
+            masks,
+            intrinsics,
+            extrinsics,
+            inv_intrinsics,
+            inv_extrinsics,
+            ref_extrinsic,
+            ref_inv_extrinsic,
         )
