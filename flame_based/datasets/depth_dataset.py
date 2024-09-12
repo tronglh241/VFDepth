@@ -33,13 +33,25 @@ class DepthDataset(Dataset):
         next_images = [self.load_image(file) for file in next_image_files]
         masks = [self.load_mask(file) for file in mask_files]
 
-        prev_images, cur_images, next_images, intrinsics, extrinsics = self.sample_transforms(
+        (
+            prev_images,
+            cur_images,
+            next_images,
+            aug_prev_images,
+            aug_cur_images,
+            aug_next_images,
+            intrinsics,
+            extrinsics,
+        ) = self.sample_transforms(
             prev_images, cur_images, next_images, intrinsics, extrinsics,
         )
         masks = self.mask_transforms(masks)
         prev_images = torch.stack(prev_images)
         cur_images = torch.stack(cur_images)
         next_images = torch.stack(next_images)
+        aug_prev_images = torch.stack(aug_prev_images)
+        aug_cur_images = torch.stack(aug_cur_images)
+        aug_next_images = torch.stack(aug_next_images)
         masks = torch.stack(masks)
 
         extrinsics_tensor = torch.from_numpy(np.stack(extrinsics))
@@ -48,7 +60,18 @@ class DepthDataset(Dataset):
 
         ref_extrinsic = extrinsics_tensor[ref_extrinsic_idx:ref_extrinsic_idx + 1]
 
-        return prev_images, cur_images, next_images, masks, intrinsics_tensor, extrinsics_tensor, ref_extrinsic
+        return (
+            aug_prev_images,
+            aug_cur_images,
+            aug_next_images,
+            masks,
+            intrinsics_tensor,
+            extrinsics_tensor,
+            ref_extrinsic,
+            prev_images,
+            cur_images,
+            next_images,
+        )
 
     def load_image(self, path: str):
         with open(path, 'rb') as f:

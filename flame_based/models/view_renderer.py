@@ -117,15 +117,16 @@ class ViewRenderer(nn.Module):
 
     def forward(
         self,
-        cam_prev_image,
-        cam_image,
-        cam_next_image,
-        cam_mask,
-        cam_intrinsic,
-        cam_inv_intrinsic,
-        cam_true_depth_map,
-        cam_prev_to_cur_pose,
-        cam_cur_to_next_pose,
+        org_prev_image,
+        org_image,
+        org_next_image,
+        mask,
+        intrinsic,
+        inv_intrinsic,
+        true_depth_map,
+        prev_to_cur_pose,
+        cur_to_next_pose,
+        cam_index,
         neighbor_cam_indices,
         rel_pose_dict,
     ):
@@ -133,25 +134,26 @@ class ViewRenderer(nn.Module):
         # source_scale = 0
 
         # ref inputs
-        ref_color = cam_image  # inputs['color', 0, source_scale][:, cam, ...]
-        ref_mask = cam_mask  # inputs['mask'][:, cam, ...]
-        ref_K = cam_intrinsic  # inputs[('K', source_scale)][:, cam, ...]
-        ref_invK = cam_inv_intrinsic  # inputs[('inv_K', source_scale)][:, cam, ...]
+        ref_color = org_image[:, cam_index]  # inputs['color', 0, source_scale][:, cam, ...]
+        ref_mask = mask[:, cam_index]  # inputs['mask'][:, cam, ...]
+        ref_K = intrinsic[:, cam_index]  # inputs[('K', source_scale)][:, cam, ...]
+        ref_invK = inv_intrinsic[:, cam_index]  # inputs[('inv_K', source_scale)][:, cam, ...]
 
         # output
         # target_view = outputs[('cam', cam)]
+        warped_views = {}
 
-        ref_depth = cam_true_depth_map  # target_view[('depth', scale)]
+        ref_depth = true_depth_map[:, cam_index]  # target_view[('depth', scale)]
         for frame_id, T, src_color in zip(
             [-1, 1],
-            [cam_prev_to_cur_pose, cam_cur_to_next_pose],
-            [cam_prev_image, cam_next_image],
+            [prev_to_cur_pose[:, cam_index], cur_to_next_pose[:, cam_index]],
+            [org_prev_image[:, cam_index], org_next_image[:, cam_index]],
         ):
             # for frame_id in self.frame_ids[1:]:
             # for temporal learning
             # T = target_view[('cam_T_cam', 0, frame_id)]
             # src_color = inputs['color', frame_id, source_scale][:, cam, ...]
-            src_mask = cam_mask  # inputs['mask'][:, cam, ...]
+            src_mask = mask[:, cam_index]  # inputs['mask'][:, cam, ...]
             warped_img, warped_mask = self.get_virtual_image(
                 src_color,
                 src_mask,
@@ -168,23 +170,20 @@ class ViewRenderer(nn.Module):
                 warped_mask
             )
 
-            target_view[('color', frame_id, scale)] = warped_img
-            target_view[('color_mask', frame_id, scale)] = warped_mask
+            warped_views[('color', frame_id)] = warped_img
+            warped_views[('color_mask', frame_id)] = warped_mask
 
         # spatio-temporal learning
-        for frame_id, T, src_color in zip(
-            [-1, 1],
-            [cam_prev_to_cur_pose, cam_cur_to_next_pose],
-            [cam_prev_image, cam_next_image],
-        ):
+        for frame_id in [-1, 1]:
             overlap_img = torch.zeros_like(ref_color)
             overlap_mask = torch.zeros_like(ref_mask)
+            src_colors = org_prev_image if frame_id < 0 else org_next_image
 
             for cur_index in neighbor_cam_indices:
                 # for partial surround view training
-                src_color = inputs['color', frame_id, source_scale][:, cur_index, ...]
-                src_mask = inputs['mask'][:, cur_index, ...]
-                src_K = inputs[('K', source_scale)][:, cur_index, ...]
+                src_color = src_colors[:, cur_index, ...]
+                src_mask = mask[:, cur_index, ...]
+                src_K = intrinsic[:, cur_index, ...]
 
                 rel_pose = rel_pose_dict[(frame_id, cur_index)]
                 warped_img, warped_mask = self.get_virtual_image(
@@ -194,22 +193,20 @@ class ViewRenderer(nn.Module):
                     ref_invK,
                     src_K,
                     rel_pose,
-                    source_scale
                 )
 
-                if self.intensity_align:
-                    warped_img = self.get_norm_image_single(
-                        ref_color,
-                        ref_mask,
-                        warped_img,
-                        warped_mask
-                    )
+                warped_img = self.get_norm_image_single(
+                    ref_color,
+                    ref_mask,
+                    warped_img,
+                    warped_mask
+                )
 
                 # assuming no overlap between warped images
                 overlap_img = overlap_img + warped_img
                 overlap_mask = overlap_mask + warped_mask
 
-            target_view[('overlap', frame_id, scale)] = overlap_img
-            target_view[('overlap_mask', frame_id, scale)] = overlap_mask
+            warped_views[('overlap', frame_id)] = overlap_img
+            warped_views[('overlap_mask', frame_id)] = overlap_mask
 
-        outputs[('cam', cam)] = target_view
+        return warped_views

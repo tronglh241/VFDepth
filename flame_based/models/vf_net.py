@@ -5,6 +5,7 @@ import torch.nn.functional as F
 from torch import nn
 
 from .blocks import conv1d, conv2d, pack_cam_feat
+from .camera import PinHole
 
 
 class VFNet(nn.Module):
@@ -117,7 +118,7 @@ class VFNet(nn.Module):
         feats_agg,
     ):
         # backproject each per-pixel feature into 3D space (or sample per-pixel features for each voxel)
-        voxel_feat_list, voxel_mask_list = self.backproject_into_voxel(feats_agg, mask, intrinsic, extrinsic)
+        voxel_feat_list, voxel_mask_list = self.backproject_into_voxel2(feats_agg, mask, intrinsic, extrinsic)
         return voxel_feat_list, voxel_mask_list
 
     def backproject_into_voxel(
@@ -162,6 +163,69 @@ class VFNet(nn.Module):
             # v_pts_local[:, 2:3, :] should be divided by (self.voxel_size[0] * self.voxel_unit_size[0])
             feat_warped = torch.cat([feat_warped.squeeze(-1), v_pts_local[:, 2:3, :] / self.voxel_size[0]], dim=1)
             feat_warped = feat_warped * valid_mask.float()
+            voxel_feat_list.append(feat_warped)
+            voxel_mask_list.append(valid_mask)
+
+        return voxel_feat_list, voxel_mask_list
+
+    def backproject_into_voxel2(
+        self,
+        feats_agg,
+        input_mask,
+        intrinsic,
+        extrinsic,
+    ):
+        """
+        This function backprojects 2D features into 3D voxel coordinate using intrinsic and extrinsic of each camera.
+        Self-occluded regions are removed by using the projected mask in 3D voxel coordinate.
+        """
+        voxel_feat_list = []
+        voxel_mask_list = []
+
+        for cam in range(feats_agg.shape[1]):
+            feats_img = feats_agg[:, cam, ...]
+            _, _, h_dim, w_dim = feats_img.size()
+
+            mask_img = input_mask[:, cam, ...]
+            mask_img = F.interpolate(mask_img, [h_dim, w_dim], mode='bilinear', align_corners=True)
+
+            pin_hole = PinHole(width=w_dim, height=h_dim, extrinsic=extrinsic[:, cam], intrinsic=intrinsic[:, cam])
+            norm_points_2d, valid_points, points_depth = pin_hole.project(self.voxel_pts[:3].T.to(extrinsic.device))
+
+            assert norm_points_2d.shape == (feats_img.shape[0], self.n_voxels, 2)
+            assert valid_points.shape == (feats_img.shape[0], self.n_voxels)
+            assert points_depth.shape == (feats_img.shape[0], self.n_voxels)
+
+            norm_points_2d = norm_points_2d.unsqueeze(-2)
+            assert norm_points_2d.shape == (feats_img.shape[0], self.n_voxels, 1, 2)
+            assert mask_img.shape[1] == 1
+
+            roi_points = 0.5 < F.grid_sample(
+                mask_img,
+                norm_points_2d,
+                mode='nearest',
+                padding_mode='zeros',
+                align_corners=True,
+            ).squeeze(-1).squeeze(1)
+            assert roi_points.shape == (feats_img.shape[0], self.n_voxels)
+
+            valid_mask = valid_points * roi_points
+            valid_mask = valid_mask.unsqueeze(1)
+
+            # retrieve each per-pixel feature. [b, feat_dim, n_voxels, 1]
+            feat_warped = F.grid_sample(
+                feats_img,
+                norm_points_2d,
+                mode='bilinear',
+                padding_mode='zeros',
+                align_corners=True,
+            ).squeeze(-1)
+
+            # concatenate relative depth as the feature. [b, feat_dim + 1, n_voxels]
+            # TODO: this should be double-checked
+            # points_depth.unsqueeze(1) should be divided by (self.voxel_size[0] * self.voxel_unit_size[0])
+            feat_warped = torch.cat([feat_warped, points_depth.unsqueeze(1) / self.voxel_size[0]], dim=1)
+            feat_warped = feat_warped * valid_mask
 
             voxel_feat_list.append(feat_warped)
             voxel_mask_list.append(valid_mask)
@@ -262,7 +326,7 @@ class VFNet(nn.Module):
     def project_voxel_into_image(
         self,
         voxel_feat,
-        inv_intrisic,
+        inv_intrinsic,
         inv_extrinsic,
     ):
         """
@@ -275,10 +339,63 @@ class VFNet(nn.Module):
         voxel_feat = voxel_feat.view(b, feat_dim, self.z_dim, self.y_dim, self.x_dim)
 
         proj_feats = []
-        for cam in range(inv_intrisic.shape[1]):
+        for cam in range(inv_intrinsic.shape[1]):
             # construct 3D point grid for each view
-            cam_points = torch.matmul(inv_intrisic[:, cam, :3, :3], self.pixel_grid.to(inv_intrisic.device))
+            cam_points = torch.matmul(inv_intrinsic[:, cam, :3, :3], self.pixel_grid.to(inv_intrinsic.device))
             cam_points = self.depth_grid.to(cam_points.device) * cam_points.view(b, 3, 1, self.num_pix)
+            cam_points = torch.cat(
+                [cam_points, self.pixel_ones.unsqueeze(0).repeat(b, 1, 1, 1).to(cam_points.device)],
+                dim=1,
+            )  # [b, 4, n_depthbins, n_pixels]
+            cam_points = cam_points.view(b, 4, -1)  # [b, 4, n_depthbins * n_pixels]
+
+            # apply extrinsic: local 3D point -> global coordinate, [b, 3, n_depthbins * n_pixels]
+            points = torch.matmul(inv_extrinsic[:, cam, :3, :], cam_points)
+
+            # 3D grid_sample [b, n_voxels, 3], value: (x, y, z) point
+            grid = points.permute(0, 2, 1)
+
+            for i in range(3):
+                v_length = self.voxel_end_point[i] - self.voxel_start_point[i]
+                grid[:, :, i] = (grid[:, :, i] - self.voxel_start_point[i]) / v_length * 2. - 1.
+
+            grid = grid.view(b, self.proj_depth_bins, self.img_h, self.img_w, 3)
+            proj_feat = F.grid_sample(voxel_feat, grid, mode='bilinear', padding_mode='zeros', align_corners=True)
+            proj_feat = proj_feat.view(b, self.proj_depth_bins * self.v_dim_o[-1], self.img_h, self.img_w)
+
+            # conv, reduce dimension
+            proj_feat = self.reduce_dim(proj_feat)
+            proj_feats.append(proj_feat)
+        return proj_feats
+
+    def project_voxel_into_image2(
+        self,
+        voxel_feat,
+        inv_intrinsic,
+        inv_extrinsic,
+    ):
+        """
+        This function projects voxels into 2D image coordinate.
+        [b, feat_dim, n_voxels] -> [b, feat_dim, d, h, w]
+        """
+        # define depth bin
+        # [b, feat_dim, n_voxels] -> [b, feat_dim, d, h, w]
+        intrinsic = torch.inverse(inv_intrinsic)
+        extrinsic = torch.inverse(inv_extrinsic)
+        b, feat_dim, _ = voxel_feat.size()
+        voxel_feat = voxel_feat.view(b, feat_dim, self.z_dim, self.y_dim, self.x_dim)
+
+        proj_feats = []
+        for cam in range(inv_intrinsic.shape[1]):
+            # construct 3D point grid for each view
+            pin_hole = PinHole(
+                width=self.img_w,
+                height=self.img_h,
+                extrinsic=extrinsic[:, cam],
+                intrinsic=intrinsic[:, cam],
+            )
+            cam_points = pin_hole.inv_project_im(self.depth_grid[0].T.to(intrinsic.device))
+            cam_points = cam_points.permute(0, 3, 2, 1)
             cam_points = torch.cat(
                 [cam_points, self.pixel_ones.unsqueeze(0).repeat(b, 1, 1, 1).to(cam_points.device)],
                 dim=1,
@@ -441,6 +558,6 @@ class DepthVFNet(VFNet):
         voxel_feat = voxel_non_overlap + voxel_overlap
 
         # for each pixel, collect voxel features -> output image feature
-        proj_feats = self.project_voxel_into_image(voxel_feat, inv_intrinsic, inv_extrinsic)
+        proj_feats = self.project_voxel_into_image2(voxel_feat, inv_intrinsic, inv_extrinsic)
         proj_feat = pack_cam_feat(torch.stack(proj_feats, 1))
         return proj_feat

@@ -77,6 +77,9 @@ class NuScenesDataset(DepthDataset):
     def _sample_transforms(self, prev_images, cur_images, next_images, intrinsics, extrinsics):
         assert len(prev_images) == len(cur_images) == len(next_images) == len(intrinsics) == len(extrinsics)
 
+        original_prev_images = []
+        original_cur_images = []
+        original_next_images = []
         transformed_prev_images = []
         transformed_cur_images = []
         transformed_next_images = []
@@ -93,6 +96,9 @@ class NuScenesDataset(DepthDataset):
                 'extrinsics': extrinsic,
             }
             sample = self._transforms(sample)
+            original_prev_images.append(sample['rgb_context_original'][0])
+            original_next_images.append(sample['rgb_context_original'][1])
+            original_cur_images.append(sample['rgb_original'])
             transformed_prev_images.append(sample['rgb_context'][0])
             transformed_next_images.append(sample['rgb_context'][1])
             transformed_cur_images.append(sample['rgb'])
@@ -100,6 +106,9 @@ class NuScenesDataset(DepthDataset):
             transformed_extrinsics.append(sample['extrinsics'])
 
         return (
+            original_prev_images,
+            original_next_images,
+            original_cur_images,
             transformed_prev_images,
             transformed_cur_images,
             transformed_next_images,
@@ -160,8 +169,16 @@ class NuScenesDataset(DepthDataset):
             extrinsics.append(extrinsic)
 
         (
-            prev_images, cur_images, next_images, masks,
-            intrinsics, extrinsics, ref_extrinsic,
+            prev_images,
+            cur_images,
+            next_images,
+            masks,
+            intrinsics,
+            extrinsics,
+            ref_extrinsic,
+            aug_prev_images,
+            aug_cur_images,
+            aug_next_images,
         ) = super(NuScenesDataset, self).__getitem__(
             prev_image_files=prev_image_files,
             cur_image_files=cur_image_files,
@@ -191,4 +208,7 @@ class NuScenesDataset(DepthDataset):
             inv_extrinsics,
             ref_extrinsic,
             ref_inv_extrinsic,
+            aug_prev_images,
+            aug_cur_images,
+            aug_next_images,
         )
