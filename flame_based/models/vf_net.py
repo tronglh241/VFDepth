@@ -118,10 +118,10 @@ class VFNet(nn.Module):
         feats_agg,
     ):
         # backproject each per-pixel feature into 3D space (or sample per-pixel features for each voxel)
-        voxel_feat_list, voxel_mask_list = self.backproject_into_voxel2(feats_agg, mask, intrinsic, extrinsic)
+        voxel_feat_list, voxel_mask_list = self.backproject_into_voxel(feats_agg, mask, intrinsic, extrinsic)
         return voxel_feat_list, voxel_mask_list
 
-    def backproject_into_voxel(
+    def backproject_into_voxel_org(
         self,
         feats_agg,
         input_mask,
@@ -168,7 +168,7 @@ class VFNet(nn.Module):
 
         return voxel_feat_list, voxel_mask_list
 
-    def backproject_into_voxel2(
+    def backproject_into_voxel(
         self,
         feats_agg,
         input_mask,
@@ -323,7 +323,7 @@ class VFNet(nn.Module):
             voxel = conv_o(voxel)
         return voxel * overlap_mask.float()
 
-    def project_voxel_into_image(
+    def project_voxel_into_image_org(
         self,
         voxel_feat,
         inv_intrinsic,
@@ -368,7 +368,7 @@ class VFNet(nn.Module):
             proj_feats.append(proj_feat)
         return proj_feats
 
-    def project_voxel_into_image2(
+    def project_voxel_into_image(
         self,
         voxel_feat,
         inv_intrinsic,
@@ -394,7 +394,8 @@ class VFNet(nn.Module):
                 extrinsic=extrinsic[:, cam],
                 intrinsic=intrinsic[:, cam],
             )
-            cam_points = pin_hole.inv_project_im(self.depth_grid[0].T.to(intrinsic.device))
+            cam_points = pin_hole.inv_project_im(self.depth_grid[0].T.view(self.img_h, self.img_w, self.depth_grid[0].shape[0]).to(intrinsic.device))
+            cam_points = cam_points.view(cam_points.shape[0], cam_points.shape[1] * cam_points.shape[2], cam_points.shape[3], cam_points.shape[4])
             cam_points = cam_points.permute(0, 3, 2, 1)
             cam_points = torch.cat(
                 [cam_points, self.pixel_ones.unsqueeze(0).repeat(b, 1, 1, 1).to(cam_points.device)],
@@ -558,6 +559,6 @@ class DepthVFNet(VFNet):
         voxel_feat = voxel_non_overlap + voxel_overlap
 
         # for each pixel, collect voxel features -> output image feature
-        proj_feats = self.project_voxel_into_image2(voxel_feat, inv_intrinsic, inv_extrinsic)
+        proj_feats = self.project_voxel_into_image(voxel_feat, inv_intrinsic, inv_extrinsic)
         proj_feat = pack_cam_feat(torch.stack(proj_feats, 1))
         return proj_feat

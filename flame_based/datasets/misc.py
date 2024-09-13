@@ -1,6 +1,6 @@
 # Copyright 2020 Toyota Research Institute.  All rights reserved.
 
-from .types import is_int, is_list
+from .types_utils import is_int, is_list
 
 ########################################################################################################################
 

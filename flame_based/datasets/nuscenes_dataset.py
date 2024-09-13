@@ -24,7 +24,6 @@ class NuScenesDataset(DepthDataset):
         ],
         mask_dir: str = '',
         token_list_file: str = '',
-        mode: str = 'train',
         image_shape: Tuple[int, int] = (640, 352),  # (width, height)
         jittering: Tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0),  # (brightness, contrast, saturation, hue)
         crop_train_borders: Tuple[float, float, float, float] = (),  # (left, top, right, down)
@@ -55,9 +54,8 @@ class NuScenesDataset(DepthDataset):
             assert sample['prev'] != '', f'Sample {token} does not have a predecessor.'
             assert sample['next'] != '', f'Sample {token} does not have a successor.'
 
-        SUPPORTED_MODE = ['train', 'validation', 'test']
-        if mode not in SUPPORTED_MODE:
-            raise ValueError(f'`mode` has to be in {SUPPORTED_MODE}.')
+        # SUPPORTED_MODE = ['train', 'validation', 'test']
+        mode = 'train'  # hard-coded to always resize input
 
         width, height = image_shape
         self._transforms = get_transforms(
@@ -179,7 +177,7 @@ class NuScenesDataset(DepthDataset):
             aug_prev_images,
             aug_cur_images,
             aug_next_images,
-        ) = super(NuScenesDataset, self).__getitem__(
+        ) = self.get_item(
             prev_image_files=prev_image_files,
             cur_image_files=cur_image_files,
             next_image_files=next_image_files,
@@ -189,13 +187,9 @@ class NuScenesDataset(DepthDataset):
             ref_extrinsic_idx=self.ref_extrinsic_idx,
         )
 
-        inv_intrinsics = torch.inverse(intrinsics)
-
         # nuScenes only
-        inv_extrinsics = extrinsics
-        extrinsics = torch.inverse(inv_extrinsics)
-        ref_inv_extrinsic = ref_extrinsic
-        ref_extrinsic = torch.inverse(ref_inv_extrinsic)
+        extrinsics = torch.inverse(extrinsics)
+        ref_extrinsic = torch.inverse(ref_extrinsic)
 
         return (
             prev_images,
@@ -204,10 +198,7 @@ class NuScenesDataset(DepthDataset):
             masks,
             intrinsics,
             extrinsics,
-            inv_intrinsics,
-            inv_extrinsics,
             ref_extrinsic,
-            ref_inv_extrinsic,
             aug_prev_images,
             aug_cur_images,
             aug_next_images,

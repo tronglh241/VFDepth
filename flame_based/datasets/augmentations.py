@@ -8,7 +8,7 @@ import torchvision.transforms as transforms
 from PIL import Image
 
 from .misc import filter_dict
-from .types import is_seq
+from .types_utils import is_seq
 
 ########################################################################################################################
 

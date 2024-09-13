@@ -49,6 +49,6 @@ def is_seq(data):
 
 def is_cfg(data):
     """Checks if data is a configuration node"""
-    return type(data) == yacs.config.CfgNode
+    return isinstance(data, yacs.config.CfgNode)
 
 ########################################################################################################################

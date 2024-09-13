@@ -26,7 +26,22 @@ class Camera(ABC):
         pass
 
     def inv_project_im(self, depth_map: torch.Tensor) -> torch.Tensor:
-        return self.inv_project(self.pix_coords.to(depth_map.device), depth_map)
+        # depth_map (..., height, width, n)
+        *pre_dims, height, width, n = depth_map.shape
+        assert (height, width) == (self.height, self.width)
+
+        pix_coords = self.pix_coords.to(depth_map.device)
+        depth_map = depth_map.reshape(*pre_dims, height * width, n)
+
+        points_3d = self.inv_project(pix_coords, depth_map)
+        *pre_dims, num_pixels, _, _ = points_3d.shape
+        assert num_pixels == height * width
+        assert (n, 3) == points_3d.shape[-2:]
+
+        points_3d = points_3d.reshape(*pre_dims, height, width, n, 3)
+
+        # points_3d (..., height, width, n, 3)
+        return points_3d
 
 
 class PinHole(Camera):
@@ -53,6 +68,7 @@ class PinHole(Camera):
         points_3d: torch.Tensor,
         normalize: bool = True,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        # points_3d (..., 3)
         assert points_3d.shape[-1] == 3
 
         points_3d = torch.cat([points_3d, torch.ones((*points_3d.shape[:-1], 1), device=points_3d.device)], dim=-1)
@@ -78,6 +94,9 @@ class PinHole(Camera):
             points_2d = points_2d / torch.tensor([self.width - 1, self.height - 1], device=points_2d.device)
             points_2d = (points_2d - 0.5) * 2
 
+        # points_2d (..., 2)
+        # valid_points (..., )
+        # points_depth (..., )
         return points_2d, valid_points, points_depth
 
     def project_org(self, points_3d: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -124,6 +143,7 @@ class PinHole(Camera):
     def inv_project(self, points_2d: torch.Tensor, depth: torch.Tensor) -> torch.Tensor:
         # points_2d (..., 2)
         # depth (..., n)
+        assert points_2d.shape[-1] == 2
         points_2d = torch.cat([points_2d, torch.ones((*points_2d.shape[:-1], 1), device=points_2d.device)], dim=-1)
         inv_intrinsic = torch.inverse(self.intrinsic)
 
@@ -131,5 +151,5 @@ class PinHole(Camera):
         points_3d = torch.transpose(points_3d, -2, -1)
         points_3d = points_3d.unsqueeze(-2) * depth.unsqueeze(-1)
 
-        # points_3d (..., n, 2)
+        # points_3d (..., n, 3)
         return points_3d

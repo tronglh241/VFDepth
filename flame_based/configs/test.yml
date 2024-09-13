@@ -12,7 +12,6 @@ data:
           verbose: True
           token_list_file: "'../dataset/nuscenes/val.txt'"
           mask_dir: "'../dataset/nuscenes_mask'"
-          mode: "'train'"
           image_shape: (640, 352)
           jittering: (0.0, 0.0, 0.0, 0.0)
           crop_train_borders: ()
@@ -33,7 +32,7 @@ engine:
     data: data.test
     device: "'cuda'"
     prepare_batch: prepare_batch
-    model_fn: 'lambda model, x: model(x[0], x[1], x[2], x[3], x[4], x[5], x[8])'
+    model_fn: 'lambda model, x: model(x[0], x[1], x[2], x[3], x[4], x[5], x[6])'
 
 # metrics:
 #   module: flame.handlers

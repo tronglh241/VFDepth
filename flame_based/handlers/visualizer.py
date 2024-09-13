@@ -40,18 +40,21 @@ class Visualizer(Handler):
         self.cmap = cm.get_cmap('plasma')
 
         actions = []
+
         action = {
             'engine': evaluator,
             'event': Events.EPOCH_STARTED,
             'func': self.create_writer,
         }
         actions.append(action)
+
         action = {
             'engine': evaluator,
             'event': Events.EPOCH_COMPLETED,
             'func': self.release_writer,
         }
         actions.append(action)
+
         action = {
             'engine': evaluator,
             'event': Events.ITERATION_COMPLETED,
@@ -65,12 +68,14 @@ class Visualizer(Handler):
         epoch = self.trainer.state.epoch
         out_name = f'{self.out_name}_{epoch}.{self.file_ext}'
         out_file = str(self.out_dir.joinpath(out_name))
+
         self.out_writer = cv2.VideoWriter(
             out_file,
             cv2.VideoWriter_fourcc(*self.fourcc),
             self.fps,
             self.out_resolution,
         )
+
         if not self.out_writer.isOpened():
             raise RuntimeError(f'Unsupported codec {self.fourcc}')
 
@@ -102,13 +107,16 @@ class Visualizer(Handler):
             vis_images = []
             for i in range(num_rows):
                 row_images = []
+
                 for j in range(num_cols):
                     if i * num_cols + j < len(cam_vis_images):
                         row_images.append(cam_vis_images[i * num_cols + j])
                     else:
                         row_images.append(np.zeros((grid_cell_height, grid_cell_width, 3), dtype=float))
+
                 row_image = cv2.hconcat(row_images)
                 vis_images.append(row_image)
+
             vis_image = cv2.vconcat(vis_images)
             vis_image = cv2.resize(vis_image, self.out_resolution)
             vis_image = (vis_image * 255).astype(np.uint8)
