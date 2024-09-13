@@ -102,9 +102,7 @@ class FusedDepthNet(nn.Module):
         images,
         mask,
         intrinsic,
-        inv_intrinsic,
         extrinsic,
-        inv_extrinsic,
     ):
         # images (batch_size x num_cams x channels x height x width)
         batch_size, num_cams, _, _, _ = images.shape
@@ -133,9 +131,7 @@ class FusedDepthNet(nn.Module):
         voxel_feat = self.fusion_net(
             mask,
             intrinsic,
-            inv_intrinsic,
             extrinsic,
-            inv_extrinsic,
             feats_agg,
         )
 

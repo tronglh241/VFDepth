@@ -11,7 +11,7 @@ if __name__ == '__main__':
 
     org_model = VFDepthAlgo(cfg, 0)
     org_renderer = org_model.view_rendering
-    renderer = ViewRenderer(org_model.height, org_model.width)
+    renderer = ViewRenderer()
 
     dataset = org_model.train_dataloader()
     inputs = next(iter(dataset))

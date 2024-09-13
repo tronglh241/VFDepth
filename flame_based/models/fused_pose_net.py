@@ -121,10 +121,11 @@ class FusedPoseNet(nn.Module):
         translation,
         invert,
         ref_extrinsic,
-        ref_inv_extrinsic,
         extrinsic,
-        inv_extrinsic,
     ):
+        ref_inv_extrinsic = torch.inverse(ref_extrinsic)
+        inv_extrinsic = torch.inverse(extrinsic)
+
         ref_T = self.compute_pose(axis_angle, translation, invert)
         poses = extrinsic @ ref_inv_extrinsic @ ref_T.unsqueeze(1) @ ref_extrinsic @ inv_extrinsic
         return poses

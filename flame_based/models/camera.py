@@ -5,16 +5,24 @@ import torch
 
 
 class Camera(ABC):
-    def __init__(self, width: int, height: int):
+    def __init__(
+        self,
+        width: int,
+        height: int,
+        extrinsic: torch.Tensor,
+        intrinsic: torch.Tensor,
+    ):
         grid_xy = torch.meshgrid(torch.arange(width), torch.arange(height), indexing='xy')
         pix_coords = torch.stack(grid_xy, axis=0).view(2, height * width).T.contiguous()
 
         self.width = width
         self.height = height
+        self.extrinsic = extrinsic
+        self.intrinsic = intrinsic
         self.pix_coords = pix_coords
 
     @abstractmethod
-    def project(
+    def world_to_im(
         self,
         points_3d: torch.Tensor,
         normalize: bool = True,
@@ -22,10 +30,23 @@ class Camera(ABC):
         pass
 
     @abstractmethod
-    def inv_project(self, points_2d: torch.Tensor, depth: torch.Tensor) -> torch.Tensor:
+    def im_to_cam(self, points_2d: torch.Tensor, depth: torch.Tensor) -> torch.Tensor:
         pass
 
-    def inv_project_im(self, depth_map: torch.Tensor) -> torch.Tensor:
+    def cam_to_world(self, points_3d: torch.Tensor):
+        # points_3d (..., 3)
+        assert points_3d.shape[-1] == 3
+
+        inv_extrinsic = torch.inverse(self.extrinsic)
+
+        points_3d = torch.cat([points_3d, torch.ones((*points_3d.shape[:-1], 1), device=points_3d.device)], dim=-1)
+        points_3d = inv_extrinsic[..., :3, :] @ torch.transpose(points_3d, -2, -1)
+        points_3d = torch.transpose(points_3d, -2, -1)
+
+        # points_3d (..., 3)
+        return points_3d
+
+    def im_to_cam_map(self, depth_map: torch.Tensor) -> torch.Tensor:
         # depth_map (..., height, width, n)
         *pre_dims, height, width, n = depth_map.shape
         assert (height, width) == (self.height, self.width)
@@ -33,7 +54,7 @@ class Camera(ABC):
         pix_coords = self.pix_coords.to(depth_map.device)
         depth_map = depth_map.reshape(*pre_dims, height * width, n)
 
-        points_3d = self.inv_project(pix_coords, depth_map)
+        points_3d = self.im_to_cam(pix_coords, depth_map)
         *pre_dims, num_pixels, _, _ = points_3d.shape
         assert num_pixels == height * width
         assert (n, 3) == points_3d.shape[-2:]
@@ -53,17 +74,15 @@ class PinHole(Camera):
         intrinsic: torch.Tensor,
         eps: float = 1e-8,
     ):
-        super(PinHole, self).__init__(width, height)
+        super(PinHole, self).__init__(width, height, extrinsic, intrinsic)
 
         assert len(extrinsic.shape) == len(intrinsic.shape)
         assert extrinsic.shape[-2:] == (4, 4)
         assert intrinsic.shape[-2:] == (4, 4)
 
-        self.extrinsic = extrinsic
-        self.intrinsic = intrinsic
         self.eps = eps
 
-    def project(
+    def world_to_im(
         self,
         points_3d: torch.Tensor,
         normalize: bool = True,
@@ -140,7 +159,7 @@ class PinHole(Camera):
 
         return points_2d, valid_points, points_depth
 
-    def inv_project(self, points_2d: torch.Tensor, depth: torch.Tensor) -> torch.Tensor:
+    def im_to_cam(self, points_2d: torch.Tensor, depth: torch.Tensor) -> torch.Tensor:
         # points_2d (..., 2)
         # depth (..., n)
         assert points_2d.shape[-1] == 2

@@ -1,4 +1,3 @@
-import numpy as np
 import torch
 import torch.nn.functional as F
 from torch import nn
@@ -6,91 +5,48 @@ from torch import nn
 from .camera import PinHole
 
 
-class Projection(nn.Module):
-    """
-    This class computes projection and reprojection function.
-    """
-
-    def __init__(self, height, width):
-        super().__init__()
-        self.width = width
-        self.height = height
-
-        # initialize img point grid
-        img_points = np.meshgrid(range(width), range(height), indexing='xy')
-        img_points = torch.from_numpy(np.stack(img_points, 0)).float()
-        img_points = torch.stack([img_points[0].view(-1), img_points[1].view(-1)], 0)  # .repeat(batch_size, 1, 1)
-
-        self.to_homo = torch.ones([1, width * height])
-        self.homo_points = torch.cat([img_points, self.to_homo], 0)
-
-    def backproject(self, invK, depth):
-        """
-        This function back-projects 2D image points to 3D.
-        """
-        batch_size = depth.shape[0]
-        depth = depth.view(batch_size, 1, -1)
-
-        points3D = torch.matmul(invK[:, :3, :3], self.homo_points.to(invK.device))
-        points3D = depth * points3D
-
-        return torch.cat([points3D, torch.stack([self.to_homo for _ in range(points3D.shape[0])]).to(points3D.device)], 1)
-
-    def reproject(self, K, points3D, T):
-        """
-        This function reprojects transformed 3D points to 2D image coordinate.
-        """
-        # project points
-        points2D = (K @ T)[:, :3, :] @ points3D
-
-        # normalize projected points for grid sample function
-        norm_points2D = points2D[:, :2, :] / (points2D[:, 2:, :] + 1e-7)
-        norm_points2D = norm_points2D.view(-1, 2, self.height, self.width)
-        norm_points2D = norm_points2D.permute(0, 2, 3, 1)
-
-        norm_points2D[..., 0] /= self.width - 1
-        norm_points2D[..., 1] /= self.height - 1
-        norm_points2D = (norm_points2D - 0.5) * 2
-        return norm_points2D
-
-    def forward(self, depth, T, bp_invK, rp_K):
-        # print(depth.shape, T.shape, bp_invK.shape, rp_K.shape)
-        cam_points = self.backproject(bp_invK, depth)
-        pix_coords = self.reproject(rp_K, cam_points, T)
-        return pix_coords
-
-
 class ViewRenderer(nn.Module):
-    def __init__(self, height, width):
-        super(ViewRenderer, self).__init__()
-        self.project = Projection(height, width)
-
-    def get_virtual_image(self, src_img, src_mask, tar_depth, tar_invK, src_K, T, tar_K, tar_extrinsic):
+    def get_virtual_image(
+        self,
+        src_img,
+        src_mask,
+        dst_depth,
+        src_intrinsic,
+        src_to_dst_transform,
+        dst_intrinsic,
+        dst_extrinsic,
+    ):
         """
         This function warps source image to target image using backprojection and reprojection process.
         """
         # do reconstruction for target from source
-        # pix_coords = self.project(tar_depth, T, tar_invK, src_K)
-        tar_pin_hole = PinHole(
-            width=self.project.width,
-            height=self.project.height,
-            extrinsic=tar_extrinsic,
-            intrinsic=tar_K,
+        # dst_depth (batch_size, 1, height, width)
+        batch_size, _, height, width = dst_depth.shape
+
+        dst_pin_hole = PinHole(
+            width=width,
+            height=height,
+            extrinsic=dst_extrinsic,
+            intrinsic=dst_intrinsic,
         )
         src_pin_hole = PinHole(
-            width=self.project.width,
-            height=self.project.height,
-            extrinsic=T,
-            intrinsic=src_K,
+            width=width,
+            height=height,
+            extrinsic=src_to_dst_transform,
+            intrinsic=src_intrinsic,
         )
-        points_3d = tar_pin_hole.inv_project_im(tar_depth.permute(0, 2, 3, 1))
+
+        points_3d = dst_pin_hole.im_to_cam_map(dst_depth.permute(0, 2, 3, 1))
+        # points_3d (batch_size, height, width, 1, 3)
         assert points_3d.shape[-2] == 1
+
         points_3d = points_3d.squeeze(-2)
-        points_3d = points_3d.view(points_3d.shape[0], points_3d.shape[1] * points_3d.shape[2], points_3d.shape[3])
-        pix_coords, _, _ = src_pin_hole.project(points_3d)
-        assert pix_coords.shape == (points_3d.shape[0], self.project.width * self.project.height, 2)
-        pix_coords = pix_coords.view(points_3d.shape[0], self.project.height, self.project.width, 2)
-        # breakpoint()
+        points_3d = points_3d.view(batch_size, height * width, 3)
+
+        pix_coords, _, _ = src_pin_hole.world_to_im(points_3d)
+        assert pix_coords.shape == (batch_size, width * height, 2)
+        pix_coords = pix_coords.view(batch_size, height, width, 2)
+
         img_warped = F.grid_sample(src_img, pix_coords, mode='bilinear',
                                    padding_mode='zeros', align_corners=True)
         mask_warped = F.grid_sample(src_mask, pix_coords, mode='nearest',
@@ -161,10 +117,8 @@ class ViewRenderer(nn.Module):
         ref_color = org_image[:, cam_index]  # inputs['color', 0, source_scale][:, cam, ...]
         ref_mask = mask[:, cam_index]  # inputs['mask'][:, cam, ...]
         ref_K = intrinsic[:, cam_index]  # inputs[('K', source_scale)][:, cam, ...]
-        ref_invK = inv_intrinsic[:, cam_index]  # inputs[('inv_K', source_scale)][:, cam, ...]
         ref_extrinsic = extrinsic[:, cam_index]
 
-        # output
         # target_view = outputs[('cam', cam)]
         warped_views = {}
 
@@ -174,16 +128,12 @@ class ViewRenderer(nn.Module):
             [prev_to_cur_pose[:, cam_index], next_to_cur_pose[:, cam_index]],
             [org_prev_image[:, cam_index], org_next_image[:, cam_index]],
         ):
-            # for frame_id in self.frame_ids[1:]:
             # for temporal learning
-            # T = target_view[('cam_T_cam', 0, frame_id)]
-            # src_color = inputs['color', frame_id, source_scale][:, cam, ...]
             src_mask = mask[:, cam_index]  # inputs['mask'][:, cam, ...]
             warped_img, warped_mask = self.get_virtual_image(
                 src_color,
                 src_mask,
                 ref_depth,
-                ref_invK,
                 ref_K,
                 T,
                 ref_K,
@@ -210,15 +160,14 @@ class ViewRenderer(nn.Module):
                 # for partial surround view training
                 src_color = src_colors[:, cur_index, ...]
                 src_mask = mask[:, cur_index, ...]
-                src_K = intrinsic[:, cur_index, ...]
+                src_intrinsic = intrinsic[:, cur_index, ...]
 
                 rel_pose = rel_pose_dict[(frame_id, cur_index)]
                 warped_img, warped_mask = self.get_virtual_image(
                     src_color,
                     src_mask,
                     ref_depth,
-                    ref_invK,
-                    src_K,
+                    src_intrinsic,
                     rel_pose,
                     ref_K,
                     ref_extrinsic,

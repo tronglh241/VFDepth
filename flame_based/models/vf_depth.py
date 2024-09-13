@@ -34,10 +34,6 @@ class VFDepth(nn.Module):
         intrinsic = intrinsic.clone()
         intrinsic[:, :, :2] /= (2 ** (self.fusion_level + 1))
 
-        inv_intrinsic = torch.inverse(intrinsic)
-        inv_extrinsic = torch.inverse(extrinsic)
-        ref_inv_extrinsic = torch.inverse(ref_extrinsic)
-
         # Previous image to current image pose estimation
         axis_angle, translation = self.pose_net(prev_image, cur_image, mask, intrinsic, extrinsic)
         prev_to_cur_poses = self.pose_net.compute_poses(
@@ -45,9 +41,7 @@ class VFDepth(nn.Module):
             translation=translation,
             invert=True,
             ref_extrinsic=ref_extrinsic,
-            ref_inv_extrinsic=ref_inv_extrinsic,
             extrinsic=extrinsic,
-            inv_extrinsic=inv_extrinsic,
         )
 
         # Current image to next image pose estimation
@@ -57,13 +51,11 @@ class VFDepth(nn.Module):
             translation=translation,
             invert=False,
             ref_extrinsic=ref_extrinsic,
-            ref_inv_extrinsic=ref_inv_extrinsic,
             extrinsic=extrinsic,
-            inv_extrinsic=inv_extrinsic,
         )
 
         # Depth estimation
-        depth_maps = self.depth_net(cur_image, mask, intrinsic, inv_intrinsic, extrinsic, inv_extrinsic)
+        depth_maps = self.depth_net(cur_image, mask, intrinsic, extrinsic)
 
         # prev_to_cur_poses (batch_size, num_cams, 4, 4)
         # next_to_cur_poses (batch_size, num_cams, 4, 4)

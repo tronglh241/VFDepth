@@ -18,7 +18,7 @@ data:
           crop_eval_borders: ()
           ref_extrinsic_idx: 0
       shuffle: False
-      batch_size: 1
+      batch_size: 2
 
 model:
   module: models.vf_depth
