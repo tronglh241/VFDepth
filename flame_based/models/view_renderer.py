@@ -59,8 +59,7 @@ class ViewRenderer(nn.Module):
         mask_warped[inf_mask_regions] = 0
 
         pix_coords = pix_coords.permute(0, 3, 1, 2)
-        invalid_mask = torch.logical_or(pix_coords > 1,
-                                        pix_coords < -1).sum(dim=1, keepdim=True) > 0
+        invalid_mask = torch.logical_or(pix_coords > 1, pix_coords < -1).sum(dim=1, keepdim=True) > 0
         return img_warped, (~invalid_mask).float() * mask_warped
 
     def get_mean_std(self, feature, mask):
@@ -151,7 +150,7 @@ class ViewRenderer(nn.Module):
             warped_views[('color_mask', frame_id)] = warped_mask
 
         # spatio-temporal learning
-        for frame_id in [-1, 1]:
+        for frame_id in [0, -1, 1]:
             overlap_img = torch.zeros_like(ref_color)
             overlap_mask = torch.zeros_like(ref_mask)
             src_colors = org_prev_image if frame_id < 0 else org_next_image
