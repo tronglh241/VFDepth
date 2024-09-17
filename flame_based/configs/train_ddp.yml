@@ -1,14 +1,14 @@
 data:
   train:
-    module: torch.utils.data
-    name: DataLoader
+    module: ignite.distributed.auto
+    name: auto_dataloader
     kwargs:
       dataset:
         module: datasets.nuscenes_dataset
         name: NuScenesDataset
         kwargs:
-          version: "'v1.0-trainval'"
-          dataroot: "'../../../datasets/nuscenes/'"
+          version: "'v1.0-mini'"
+          dataroot: "'../../../datasets/nuscenes_mini/'"
           cam_names:
             - "'CAM_FRONT'"
             - "'CAM_FRONT_LEFT'"
@@ -17,24 +17,24 @@ data:
             - "'CAM_BACK_RIGHT'"
             - "'CAM_BACK'"
           verbose: True
-          token_list_file: "'../dataset/nuscenes/train.txt'"
+          token_list_file: "'../dataset/nuscenes/mini_train.txt'"
           mask_dir: "'../dataset/nuscenes_mask'"
           image_shape: (640, 352)
           jittering: (0.2, 0.2, 0.2, 0.05)
           ref_extrinsic_idx: 0
       shuffle: True
-      batch_size: 2
+      batch_size: 4
 
   valid:
-    module: torch.utils.data
-    name: DataLoader
+    module: ignite.distributed.auto
+    name: auto_dataloader
     kwargs:
       dataset:
         module: datasets.nuscenes_dataset
         name: NuScenesDataset
         kwargs:
-          version: "'v1.0-trainval'"
-          dataroot: "'../../../datasets/nuscenes/'"
+          version: "'v1.0-mini'"
+          dataroot: "'../../../datasets/nuscenes_mini/'"
           cam_names:
             - "'CAM_FRONT'"
             - "'CAM_FRONT_LEFT'"
@@ -43,24 +43,24 @@ data:
             - "'CAM_BACK_RIGHT'"
             - "'CAM_BACK'"
           verbose: True
-          token_list_file: "'../dataset/nuscenes/val.txt'"
+          token_list_file: "'../dataset/nuscenes/mini_val.txt'"
           mask_dir: "'../dataset/nuscenes_mask'"
           image_shape: (640, 352)
           jittering: (0.0, 0.0, 0.0, 0.0)
           ref_extrinsic_idx: 0
       shuffle: False
-      batch_size: 2
+      batch_size: 4
 
   vis:
-    module: torch.utils.data
-    name: DataLoader
+    module: ignite.distributed.auto
+    name: auto_dataloader
     kwargs:
       dataset:
         module: datasets.nuscenes_dataset
         name: NuScenesDataset
         kwargs:
-          version: "'v1.0-trainval'"
-          dataroot: "'../../../datasets/nuscenes/'"
+          version: "'v1.0-mini'"
+          dataroot: "'../../../datasets/nuscenes_mini/'"
           cam_names:
             - "'CAM_FRONT'"
             - "'CAM_FRONT_LEFT'"
@@ -69,24 +69,33 @@ data:
             - "'CAM_BACK_RIGHT'"
             - "'CAM_BACK'"
           verbose: True
-          token_list_file: "'../dataset/nuscenes/val_vis.txt'"
+          token_list_file: "'../dataset/nuscenes/mini_val_vis.txt'"
           mask_dir: "'../dataset/nuscenes_mask'"
           image_shape: (640, 352)
           jittering: (0.0, 0.0, 0.0, 0.0)
           ref_extrinsic_idx: 0
       shuffle: False
-      batch_size: 2
+      batch_size: 4
 
 model:
-  module: models.vf_depth
-  name: VFDepth
+  module: ignite.distributed.auto
+  name: auto_model
+  kwargs:
+    model:
+      module: models.vf_depth
+      name: VFDepth
+    sync_bn: True
 
 optimizer:
-  module: torch.optim
-  name: Adam
+  module: ignite.distributed.auto
+  name: auto_optim
   kwargs:
-    params: model.parameters()
-    lr: 0.0001
+    optimizer:
+      module: torch.optim
+      name: Adam
+      kwargs:
+        params: model.parameters()
+        lr: 0.0001
 
 loss_fn:
   module: flame.loss
@@ -96,7 +105,7 @@ loss_fn:
       module: losses.loss_computation_wrapper
       name: LossComputationWrapper
       kwargs:
-        model: model
+        model: model.module
         loss_fn:
           module: losses.multi_cam_loss
           name: MultiCamLoss
@@ -149,6 +158,17 @@ engine:
         x[6], # ref_extrinsic
       )
 
+launcher:
+  module: ignite.distributed
+  name: Parallel
+  kwargs:
+    backend: "'nccl'"
+    nproc_per_node: 2
+    nnodes: null
+    node_rank: null
+    master_addr: null
+    master_port: null
+
 evaluators:
   valid:
     module: flame.engine
@@ -170,6 +190,7 @@ evaluators:
         )
     event: Events.EPOCH_COMPLETED
     function: run
+    rank: -1
   vis:
     module: flame.engine
     name: Evaluator.factory
@@ -216,6 +237,7 @@ lr_scheduler:
     patience: 10
   engine: evaluators.valid
   event: Events.EPOCH_COMPLETED
+  rank: -1
 
 visualization:
   module: handlers.visualizer
@@ -231,6 +253,7 @@ visualization:
     fourcc: "'mp4v'"
     grid_nrow: 3
     output_transform: 'lambda x: (x[0][2], x[1][1])'
+  rank: 0
 
 logging:
   progress_bar:
@@ -292,6 +315,7 @@ logging:
 #     trainer: engine
 #     evaluator: evaluators.valid
 #   event: Events.EPOCH_COMPLETED
+#   rank: -1
 
 checkpoint:
   best:
@@ -325,17 +349,17 @@ checkpoint:
       n_saved: 1
       global_step_transform: global_step_from_engine(engine, Events.EPOCH_COMPLETED)
 
-#   loader:
-#     module: flame.handlers
-#     name: CheckpointLoader
-#     kwargs:
-#       path: null
+  loader:
+    module: flame.handlers
+    name: CheckpointLoader
+    kwargs:
+      path: null
 
-#   config_backup:
-#     module: flame.handlers
-#     name: ConfigBackup
-#     kwargs:
-#       backup_checkpoint: checkpoint.backup
+  config_backup:
+    module: flame.handlers
+    name: ConfigBackup
+    kwargs:
+      backup_checkpoint: checkpoint.backup
 
 extralibs:
   prepare_batch:

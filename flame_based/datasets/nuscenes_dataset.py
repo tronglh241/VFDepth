@@ -47,12 +47,16 @@ class NuScenesDataset(DepthDataset):
             raise FileNotFoundError(f'{token_list_file} not found.')
 
         with token_list_file.open() as f:
-            self.token_list = [line.strip() for line in f]
+            token_list = [line.strip() for line in f]
 
-        for token in self.token_list:
+        self.token_list = []
+        for token in token_list:
             sample = self.dataset.get('sample', token)
-            assert sample['prev'] != '', f'Sample {token} does not have a predecessor.'
-            assert sample['next'] != '', f'Sample {token} does not have a successor.'
+
+            if sample['prev'] != '' and sample['next'] != '':
+                self.token_list.append(token)
+            else:
+                print('Discard {token} due to lack of predecessor or successor.')
 
         # SUPPORTED_MODE = ['train', 'validation', 'test']
         mode = 'train'  # hard-coded to always resize input
