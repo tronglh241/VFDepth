@@ -33,12 +33,16 @@ if __name__ == '__main__':
         breakpoint()
         for cam in range(org_model.num_cams):
             org_model.pred_cam_imgs(inputs, outputs, cam)
-            cam_loss, loss_dict = org_model.losses(inputs, outputs, cam)
+            org_cam_loss, org_loss_dict = org_model.losses(inputs, outputs, cam)
             outputs['cam', cam]['color', -1] = outputs['cam', cam]['color', -1, 0]
             outputs['cam', cam]['color', 1] = outputs['cam', cam]['color', 1, 0]
             outputs['cam', cam]['overlap_mask', 0] = outputs['cam', cam]['overlap_mask', 0, 0]
+            outputs['cam', cam]['overlap_mask', -1] = outputs['cam', cam]['overlap_mask', -1, 0]
+            outputs['cam', cam]['overlap_mask', 1] = outputs['cam', cam]['overlap_mask', 1, 0]
             outputs['cam', cam]['overlap', 0] = outputs['cam', cam]['overlap', 0, 0]
-            multi_cam_loss.forward(
+            outputs['cam', cam]['overlap', -1] = outputs['cam', cam]['overlap', -1, 0]
+            outputs['cam', cam]['overlap', 1] = outputs['cam', cam]['overlap', 1, 0]
+            cam_loss, loss_dict = multi_cam_loss.forward(
                 cam_org_prev_image=inputs['color', -1, 0][:, cam],
                 cam_org_image=inputs['color', 0, 0][:, cam],
                 cam_org_next_image=inputs['color', 1, 0][:, cam],
@@ -46,3 +50,4 @@ if __name__ == '__main__':
                 cam_depth_map=outputs['cam', cam]['disp', 0],
                 cam_mask=inputs['mask'][:, cam],
             )
+            breakpoint()

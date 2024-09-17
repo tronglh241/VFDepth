@@ -27,7 +27,7 @@ class Visualizer(Handler):
         self.evaluator = evaluator
 
         self.out_dir = Path(out_dir)
-        self.out_dir.parent.mkdir(parents=True, exist_ok=True)
+        self.out_dir.mkdir(parents=True, exist_ok=True)
         self.out_name = out_name
         self.out_resolution = out_resolution
         self.fps = fps

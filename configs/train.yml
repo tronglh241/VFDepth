@@ -1,21 +1,57 @@
 model:
-  module: models.vfdepth
-  name: VFDepthWrapper
-  kwargs:
-    model:
-      module: models
-      name: VFDepthAlgo
-      kwargs:
-        cfg: utils.get_config('configs/nuscenes/nusc_surround_fusion.yaml', mode='train')
-        rank: 0
+  module: models.vf_depth
+  name: VFDepth
 
 data:
-  train: model.model.train_dataloader()
-  valid: model.model.val_dataloader()
+  train:
+    module: datasets.nuscenes_dataset
+    name: NuScenesDataset
+    kwargs:
+      version: "'v1.0-mini'"
+      dataroot: "'../VFDepth/input_data/nuscenes/'"
+      cam_names:
+        - "'CAM_FRONT'"
+        - "'CAM_FRONT_LEFT'"
+        - "'CAM_FRONT_RIGHT'"
+        - "'CAM_BACK_LEFT'"
+        - "'CAM_BACK_RIGHT'"
+        - "'CAM_BACK'"
+      verbose: True
+      token_list_file: "'./dataset/nuscenes/val.txt'"
+      mask_dir: "'./dataset/nuscenes_mask'"
+      image_shape: (640, 352)
+      jittering: (0.0, 0.0, 0.0, 0.0)
+      ref_extrinsic_idx: 0
 
-optimizer: model.model.optimizer
+optimizer:
+  module: torch.optim
+  name: Adam
+  kwargs:
+    params: model.parameters()
+    lr: 0.0001
 
-loss_fn: "lambda y_pred, y: y_pred[1]['total_loss']"
+loss_fn:
+  module: losses.loss_computation_wrapper
+  name: LossComputationWrapper
+  kwargs:
+    model: model
+    loss_fn:
+      module: losses.multi_cam_loss
+      name: MultiCamLoss
+      kwargs:
+        disparity_smoothness: 0.001
+        spatio_coeff: 0.03
+        spatio_tempo_coeff: 0.1
+    max_depth: 80.0
+    min_depth: 1.5
+    focal_length_scale: 300.0
+    neighbor_cam_indices_map:
+      0: [1, 2]
+      1: [0]
+      2: [0]
+      3: [1]
+      4: [2]
+      5: [3, 4]
 
 engine:
   module: flame.engine
@@ -27,32 +63,43 @@ engine:
     loss_fn: loss_fn
     device: "'cuda'"
     max_epochs: 100
-    prepare_batch: 'lambda batch, device, non_blocking: (batch, (batch,))'
+    prepare_batch: prepare_batch
+    model_fn: 'lambda model, x: model(x[7], x[8], x[9], x[3], x[4], x[5], x[6])'
+    model_transform: 'lambda output: (\n
+      ..output[1][0],\n
+      ..output[1][1],\n
+      ..output[1][2],\n
+      ..output[1][3],\n
+      ..output[0][2],\n
+      ..output[1][4],\n
+      ..output[1][5],\n
+      ..output[0][0],\n
+      ..output[0][1])'
 
-evaluators:
-  valid:
-    module: flame.engine
-    name: Evaluator.factory
-    kwargs:
-      model: model
-      data: data.valid
-      device: "'cuda'"
-      prepare_batch: 'lambda batch, device, non_blocking: (batch, (batch,))'
-    event: Events.EPOCH_COMPLETED
-    function: run
+# evaluators:
+#   valid:
+#     module: flame.engine
+#     name: Evaluator.factory
+#     kwargs:
+#       model: model
+#       data: data.valid
+#       device: "'cuda'"
+#       prepare_batch: 'lambda batch, device, non_blocking: (batch, (batch,))'
+#     event: Events.EPOCH_COMPLETED
+#     function: run
 
-metrics:
-  module: flame.handlers
-  name: Metrics
-  kwargs:
-    evaluators:
-      - evaluators.valid
-    metrics:
-      loss:
-        module: ignite.metrics
-        name: Loss
-        kwargs:
-          loss_fn: loss_fn
+# metrics:
+#   module: flame.handlers
+#   name: Metrics
+#   kwargs:
+#     evaluators:
+#       - evaluators.valid
+#     metrics:
+#       loss:
+#         module: ignite.metrics
+#         name: Loss
+#         kwargs:
+#           loss_fn: loss_fn
 #       accuracy:
 #         module: ignite.metrics
 #         name: Accuracy
@@ -75,13 +122,13 @@ metrics:
 #         gamma: 0.8
 #   event: Events.EPOCH_COMPLETED
 
-visualizer:
-  module: handlers.visualizer
-  name: Visualizer
-  kwargs:
-    trainer: engine
-    evaluator: evaluators.valid
-    out_dir: "'output/vis'"
+# visualizer:
+#   module: handlers.visualizer
+#   name: Visualizer
+#   kwargs:
+#     trainer: engine
+#     evaluator: evaluators.valid
+#     out_dir: "'output/vis'"
 
 logging:
   progress_bar:
@@ -92,12 +139,12 @@ logging:
       evaluators:
         valid: evaluators.valid
 
-  tensorboard:
-    module: flame.handlers
-    name: Tensorboard
-    kwargs:
-      log_dir: "'logs/'"
-      logger_handlers:
+  # tensorboard:
+  #   module: flame.handlers
+  #   name: Tensorboard
+  #   kwargs:
+  #     log_dir: "'logs/'"
+  #     logger_handlers:
 #         - engine: engine
 #           event_name: Events.EPOCH_COMPLETED
 #           log_handler:
@@ -105,14 +152,14 @@ logging:
 #             name: OptimizerParamsHandler
 #             kwargs:
 #               optimizer: optimizer
-        - engine: engine
-          event_name: Events.ITERATION_COMPLETED
-          log_handler:
-            module: ignite.contrib.handlers.tensorboard_logger
-            name: OutputHandler
-            kwargs:
-              tag: "'training'"
-              output_transform: "lambda loss: {'loss': loss}"
+        # - engine: engine
+        #   event_name: Events.ITERATION_COMPLETED
+        #   log_handler:
+        #     module: ignite.contrib.handlers.tensorboard_logger
+        #     name: OutputHandler
+        #     kwargs:
+        #       tag: "'training'"
+        #       output_transform: "lambda loss: {'loss': loss}"
 #         - engine: evaluators.train
 #           event_name: Events.EPOCH_COMPLETED
 #           log_handler:
@@ -122,15 +169,15 @@ logging:
 #               tag: "'evaluation/train'"
 #               metric_names: "'all'"
 #               global_step_transform: global_step_from_engine(engine, Events.EPOCH_COMPLETED)
-        - engine: evaluators.valid
-          event_name: Events.EPOCH_COMPLETED
-          log_handler:
-            module: ignite.contrib.handlers.tensorboard_logger
-            name: OutputHandler
-            kwargs:
-              tag: "'evaluation/valid'"
-              metric_names: "'all'"
-              global_step_transform: global_step_from_engine(engine, Events.EPOCH_COMPLETED)
+        # - engine: evaluators.valid
+        #   event_name: Events.EPOCH_COMPLETED
+        #   log_handler:
+        #     module: ignite.contrib.handlers.tensorboard_logger
+        #     name: OutputHandler
+        #     kwargs:
+        #       tag: "'evaluation/valid'"
+        #       metric_names: "'all'"
+        #       global_step_transform: global_step_from_engine(engine, Events.EPOCH_COMPLETED)
 
 # early_stopping:
 #   module: flame.handlers

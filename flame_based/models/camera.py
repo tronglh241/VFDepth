@@ -118,47 +118,6 @@ class PinHole(Camera):
         # points_depth (..., )
         return points_2d, valid_points, points_depth
 
-    def project_org(self, points_3d: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        assert points_3d.shape[-1] == 3
-
-        points_3d = torch.cat([points_3d, torch.ones((*points_3d.shape[:-1], 1), device=points_3d.device)], dim=-1)
-        assert points_3d.shape[-1] == 4
-        points_3d = self.extrinsic[..., :3, :] @ torch.transpose(points_3d, -2, -1)
-        points_3d = torch.transpose(points_3d, -2, -1)
-        assert points_3d.shape[-1] == 3
-
-        points_depth = points_3d[..., 2]
-        is_point_front = points_depth > 0
-        assert is_point_front.shape == points_3d.shape[:-1]
-
-        points_2d = self.intrinsic[..., :3, :3] @ torch.transpose(points_3d, -2, -1)
-        points_2d = torch.transpose(points_2d, -2, -1)
-        assert points_2d.shape[-1] == 3
-        points_2d = points_2d[..., :2] / (points_2d[..., 2:3] + self.eps)
-        if not torch.all(torch.isfinite(points_2d)):
-            pix_coords = torch.clamp(points_2d, min=-self.width * 2, max=self.width * 2)
-        else:
-            pix_coords = points_2d
-        # print(points_2d[..., :2].mean(), points_2d[..., :2].min(), points_2d[..., :2].max())
-        # print(points_2d[..., :2].mean(), points_2d[..., :2].min(), points_2d[..., :2].max())
-        # TODO
-        # is_point_in_image = torch.logical_and(
-        #     torch.logical_and(points_2d[..., 0] <= self.width - 1, points_2d[..., 0] >= 0),
-        #     torch.logical_and(points_2d[..., 1] <= self.height - 1, points_2d[..., 1] >= 0),
-        # )
-        pix_coords = pix_coords / torch.tensor([self.width - 1, self.height - 1], device=pix_coords.device)
-        pix_coords = (pix_coords - 0.5) * 2
-        # print(pix_coords.mean())
-        is_point_in_image = ~(torch.logical_or(pix_coords > 1, pix_coords < -1).sum(dim=-1) > 0)
-        # print(is_point_in_image.sum())
-
-        points_2d = points_2d[..., :2]
-        assert points_2d.shape == (*points_3d.shape[:-1], 2)
-        # breakpoint()
-        valid_points = torch.logical_and(is_point_front, is_point_in_image)
-
-        return points_2d, valid_points, points_depth
-
     def im_to_cam(self, points_2d: torch.Tensor, depth: torch.Tensor) -> torch.Tensor:
         # points_2d (..., 2)
         # depth (..., n)
@@ -172,3 +131,78 @@ class PinHole(Camera):
 
         # points_3d (..., n, 3)
         return points_3d
+
+
+class Fisheye(Camera):
+    def __init__(
+        self,
+        width: int,
+        height: int,
+        extrinsic: torch.Tensor,
+        intrinsic: torch.Tensor,
+        distortion,
+    ):
+        super(Fisheye, self).__init__(width, height, extrinsic, intrinsic)
+        self.distortion = distortion
+        self.fx = self.intrinsic[..., 0, 0]
+        self.fy = self.intrinsic[..., 1, 1]
+        self.cx = self.intrinsic[..., 0, 2]
+        self.cy = self.intrinsic[..., 1, 2]
+
+    def world_to_im(
+        self,
+        points_3d: torch.Tensor,
+        normalize: bool = True,
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        # points_3d (..., 3)
+        assert points_3d.shape[-1] == 3
+
+        points_3d = torch.cat([points_3d, torch.ones((*points_3d.shape[:-1], 1), device=points_3d.device)], dim=-1)
+        points_3d = self.extrinsic[..., :3, :] @ torch.transpose(points_3d, -2, -1)
+        points_3d = torch.transpose(points_3d, -2, -1)
+
+        points_depth = points_3d[..., 2]
+        is_point_front = points_depth > 0
+
+        a = points_3d[..., 0] / points_3d[..., 2]
+        b = points_3d[..., 1] / points_3d[..., 2]
+        r = torch.sqrt(torch.pow(a, 2) + torch.pow(b, 2))
+        theta = torch.arctan(r)
+        theta_d = theta * (
+            1 + self.distortion[0] * torch.pow(theta, 2)
+            + self.distortion[1] * torch.pow(theta, 4)
+            + self.distortion[2] * torch.pow(theta, 6)
+            + self.distortion[3] * torch.pow(theta, 8)
+        )
+
+        x = (theta_d / r) * a
+        y = (theta_d / r) * b
+
+        u = self.fx * x + self.cx
+        v = self.fy * y + self.cy
+
+        points_2d = torch.stack([u, v], dim=-1)
+
+        # points_2d = self.intrinsic[..., :3, :3] @ torch.transpose(points_3d, -2, -1)
+        # points_2d = torch.transpose(points_2d, -2, -1)
+        # points_2d = points_2d[..., :2] / (points_2d[..., 2:3] + self.eps)
+        # points_2d = points_2d[..., :2]
+
+        is_point_in_image = torch.logical_and(
+            torch.logical_and(points_2d[..., 0] <= self.width - 1, points_2d[..., 0] >= 0),
+            torch.logical_and(points_2d[..., 1] <= self.height - 1, points_2d[..., 1] >= 0),
+        )
+
+        valid_points = torch.logical_and(is_point_front, is_point_in_image)
+
+        if normalize:
+            points_2d = points_2d / torch.tensor([self.width - 1, self.height - 1], device=points_2d.device)
+            points_2d = (points_2d - 0.5) * 2
+
+        # points_2d (..., 2)
+        # valid_points (..., )
+        # points_depth (..., )
+        return points_2d, valid_points, points_depth
+
+    def im_to_cam(self, points_2d: torch.Tensor, depth: torch.Tensor) -> torch.Tensor:
+        pass

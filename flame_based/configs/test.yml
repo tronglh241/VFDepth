@@ -32,7 +32,16 @@ engine:
     data: data.test
     device: "'cuda'"
     prepare_batch: prepare_batch
-    model_fn: 'lambda model, x: model(x[0], x[1], x[2], x[3], x[4], x[5], x[6])'
+    model_fn: >
+      lambda model, x: model(
+        x[7], # prev_image
+        x[8], # cur_image
+        x[9], # next_image
+        x[3], # mask
+        x[4], # intrinsic
+        x[5], # extrinsic
+        x[6], # ref_extrinsic
+      )
 
 # metrics:
 #   module: flame.handlers
@@ -63,7 +72,7 @@ visualization:
     file_ext: "'mp4'"
     fourcc: "'mp4v'"
     grid_nrow: 3
-    output_transform: 'lambda x: (x[0][2], x[2])'
+    output_transform: 'lambda x: (x[0][2], x[1][1])'
 
 logging:
   progress_bar:

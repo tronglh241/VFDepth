@@ -2,7 +2,7 @@
 import torch
 from pytorch3d.transforms import matrix_to_euler_angles
 
-from .loss_util import compute_photometric_loss, compute_masked_loss
+from .loss_util import compute_masked_loss, compute_photometric_loss
 from .single_cam_loss import SingleCamLoss
 
 
@@ -16,12 +16,10 @@ class MultiCamLoss(SingleCamLoss):
         disparity_smoothness,
         spatio_coeff,
         spatio_tempo_coeff,
-        output_transform=lambda x: x,
     ):
         self.disparity_smoothness = disparity_smoothness
         self.spatio_coeff = spatio_coeff
         self.spatio_tempo_coeff = spatio_tempo_coeff
-        super(MultiCamLoss, self).__init__(output_transform)
 
     def compute_spatio_loss(
         self,
@@ -128,7 +126,7 @@ class MultiCamLoss(SingleCamLoss):
         pose_loss = (trans_loss + 10 * angle_loss) / 2
         return pose_loss
 
-    def forward(
+    def __call__(
         self,
         cam_org_prev_image,
         cam_org_image,

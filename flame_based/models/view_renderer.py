@@ -96,11 +96,10 @@ class ViewRenderer(nn.Module):
     def forward(
         self,
         org_prev_image,
-        org_image,
+        org_cur_image,
         org_next_image,
         mask,
         intrinsic,
-        inv_intrinsic,
         true_depth_map,
         prev_to_cur_pose,
         next_to_cur_pose,
@@ -113,7 +112,7 @@ class ViewRenderer(nn.Module):
         # source_scale = 0
 
         # ref inputs
-        ref_color = org_image[:, cam_index]  # inputs['color', 0, source_scale][:, cam, ...]
+        ref_color = org_cur_image[:, cam_index]  # inputs['color', 0, source_scale][:, cam, ...]
         ref_mask = mask[:, cam_index]  # inputs['mask'][:, cam, ...]
         ref_K = intrinsic[:, cam_index]  # inputs[('K', source_scale)][:, cam, ...]
         ref_extrinsic = extrinsic[:, cam_index]
@@ -150,10 +149,12 @@ class ViewRenderer(nn.Module):
             warped_views[('color_mask', frame_id)] = warped_mask
 
         # spatio-temporal learning
-        for frame_id in [0, -1, 1]:
+        for frame_id, src_colors in zip(
+            [0, -1, 1],
+            [org_cur_image, org_prev_image, org_next_image],
+        ):
             overlap_img = torch.zeros_like(ref_color)
             overlap_mask = torch.zeros_like(ref_mask)
-            src_colors = org_prev_image if frame_id < 0 else org_next_image
 
             for cur_index in neighbor_cam_indices:
                 # for partial surround view training

@@ -1,19 +1,16 @@
 # Copyright (c) 2023 42dot. All rights reserved.
 import torch
 
-from .loss_util import compute_photometric_loss, compute_edg_smooth_loss, compute_masked_loss, compute_auto_masks
-from flame.loss import LossBase
+from .loss_util import (compute_auto_masks, compute_edg_smooth_loss,
+                        compute_masked_loss, compute_photometric_loss)
 
 _EPSILON = 0.00001
 
 
-class SingleCamLoss(LossBase):
+class SingleCamLoss:
     """
     Class for single camera(temporal only) loss calculation
     """
-
-    def __init__(self, output_transform=lambda x: x):
-        super(SingleCamLoss, self).__init__(output_transform)
 
     def compute_reproj_loss(
         self,
@@ -74,7 +71,7 @@ class SingleCamLoss(LossBase):
         norm_disp = cam_depth_map / (mean_disp + 1e-8)
         return compute_edg_smooth_loss(cam_org_image, norm_disp)
 
-    def forward(
+    def __call__(
         self,
         cam_org_prev_image,
         cam_org_image,

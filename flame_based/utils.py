@@ -14,4 +14,4 @@ def prepare_batch(
     for i, item in enumerate(batch):
         batch[i] = convert_tensor(item, device=device, non_blocking=non_blocking)
 
-    return (batch, batch)
+    return (batch, (batch,))
