@@ -7,8 +7,8 @@ data:
         module: datasets.nuscenes_dataset
         name: NuScenesDataset
         kwargs:
-          version: "'v1.0-mini'"
-          dataroot: "'../../../datasets/nuscenes_mini/'"
+          version: "'v1.0-trainval'"
+          dataroot: "'../../../datasets/nuscenes/'"
           cam_names:
             - "'CAM_FRONT'"
             - "'CAM_FRONT_LEFT'"
@@ -17,7 +17,7 @@ data:
             - "'CAM_BACK_RIGHT'"
             - "'CAM_BACK'"
           verbose: True
-          token_list_file: "'../dataset/nuscenes/mini_train.txt'"
+          token_list_file: "'../dataset/nuscenes/train.txt'"
           mask_dir: "'../dataset/nuscenes_mask'"
           image_shape: (640, 352)
           jittering: (0.2, 0.2, 0.2, 0.05)
@@ -33,8 +33,8 @@ data:
         module: datasets.nuscenes_dataset
         name: NuScenesDataset
         kwargs:
-          version: "'v1.0-mini'"
-          dataroot: "'../../../datasets/nuscenes_mini/'"
+          version: "'v1.0-trainval'"
+          dataroot: "'../../../datasets/nuscenes/'"
           cam_names:
             - "'CAM_FRONT'"
             - "'CAM_FRONT_LEFT'"
@@ -43,7 +43,7 @@ data:
             - "'CAM_BACK_RIGHT'"
             - "'CAM_BACK'"
           verbose: True
-          token_list_file: "'../dataset/nuscenes/mini_val.txt'"
+          token_list_file: "'../dataset/nuscenes/val.txt'"
           mask_dir: "'../dataset/nuscenes_mask'"
           image_shape: (640, 352)
           jittering: (0.0, 0.0, 0.0, 0.0)
@@ -59,8 +59,8 @@ data:
         module: datasets.nuscenes_dataset
         name: NuScenesDataset
         kwargs:
-          version: "'v1.0-mini'"
-          dataroot: "'../../../datasets/nuscenes_mini/'"
+          version: "'v1.0-trainval'"
+          dataroot: "'../../../datasets/nuscenes/'"
           cam_names:
             - "'CAM_FRONT'"
             - "'CAM_FRONT_LEFT'"
@@ -69,7 +69,7 @@ data:
             - "'CAM_BACK_RIGHT'"
             - "'CAM_BACK'"
           verbose: True
-          token_list_file: "'../dataset/nuscenes/mini_val_vis.txt'"
+          token_list_file: "'../dataset/nuscenes/val_vis.txt'"
           mask_dir: "'../dataset/nuscenes_mask'"
           image_shape: (640, 352)
           jittering: (0.0, 0.0, 0.0, 0.0)
@@ -211,7 +211,6 @@ evaluators:
         )
     event: Events.EPOCH_COMPLETED
     function: run
-    rank: 0
 
 metrics:
   module: flame.handlers
@@ -253,7 +252,6 @@ visualization:
     fourcc: "'mp4v'"
     grid_nrow: 3
     output_transform: 'lambda x: (x[0][2], x[1][1])'
-  rank: 0
 
 logging:
   progress_bar:

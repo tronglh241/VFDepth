@@ -56,7 +56,7 @@ class NuScenesDataset(DepthDataset):
             if sample['prev'] != '' and sample['next'] != '':
                 self.token_list.append(token)
             else:
-                print('Discard {token} due to lack of predecessor or successor.')
+                print(f'Discard {token} due to lack of predecessor or successor.')
 
         # SUPPORTED_MODE = ['train', 'validation', 'test']
         mode = 'train'  # hard-coded to always resize input
