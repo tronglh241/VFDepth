@@ -15,6 +15,10 @@ class Camera(ABC):
         grid_xy = torch.meshgrid(torch.arange(width), torch.arange(height), indexing='xy')
         pix_coords = torch.stack(grid_xy, axis=0).view(2, height * width).T.contiguous()
 
+        assert len(extrinsic.shape) == len(intrinsic.shape)
+        assert extrinsic.shape[-2:] == (4, 4)
+        assert intrinsic.shape[-2:] == (4, 4)
+
         self.width = width
         self.height = height
         self.extrinsic = extrinsic
@@ -75,11 +79,6 @@ class PinHole(Camera):
         eps: float = 1e-8,
     ):
         super(PinHole, self).__init__(width, height, extrinsic, intrinsic)
-
-        assert len(extrinsic.shape) == len(intrinsic.shape)
-        assert extrinsic.shape[-2:] == (4, 4)
-        assert intrinsic.shape[-2:] == (4, 4)
-
         self.eps = eps
 
     def world_to_im(
@@ -140,7 +139,9 @@ class Fisheye(Camera):
         height: int,
         extrinsic: torch.Tensor,
         intrinsic: torch.Tensor,
-        distortion,
+        distortion: torch.Tensor,
+        eps: float = 1e-8,
+        max_count: int = 10,
     ):
         super(Fisheye, self).__init__(width, height, extrinsic, intrinsic)
         self.distortion = distortion
@@ -148,6 +149,8 @@ class Fisheye(Camera):
         self.fy = self.intrinsic[..., 1, 1]
         self.cx = self.intrinsic[..., 0, 2]
         self.cy = self.intrinsic[..., 1, 2]
+        self.eps = eps
+        self.max_count = max_count
 
     def world_to_im(
         self,
@@ -164,9 +167,8 @@ class Fisheye(Camera):
         points_depth = points_3d[..., 2]
         is_point_front = points_depth > 0
 
-        a = points_3d[..., 0] / points_3d[..., 2]
-        b = points_3d[..., 1] / points_3d[..., 2]
-        r = torch.sqrt(torch.pow(a, 2) + torch.pow(b, 2))
+        points_2d = points_3d[..., :2] / (points_3d[..., 2:3] + self.eps)
+        r = torch.sqrt(points_2d[..., 0].unsqueeze(-2) @ points_2d[..., 1].unsqueeze(-1))
         theta = torch.arctan(r)
         theta_d = theta * (
             1 + self.distortion[0] * torch.pow(theta, 2)
@@ -175,18 +177,16 @@ class Fisheye(Camera):
             + self.distortion[3] * torch.pow(theta, 8)
         )
 
-        x = (theta_d / r) * a
-        y = (theta_d / r) * b
+        inv_r = 1.0 / r if r > 1e-8 else 1.0
+        cdist = theta_d * inv_r if r > 1e-8 else 1.0
+
+        x = cdist * points_2d[..., 0]
+        y = cdist * points_2d[..., 1]
 
         u = self.fx * x + self.cx
         v = self.fy * y + self.cy
 
         points_2d = torch.stack([u, v], dim=-1)
-
-        # points_2d = self.intrinsic[..., :3, :3] @ torch.transpose(points_3d, -2, -1)
-        # points_2d = torch.transpose(points_2d, -2, -1)
-        # points_2d = points_2d[..., :2] / (points_2d[..., 2:3] + self.eps)
-        # points_2d = points_2d[..., :2]
 
         is_point_in_image = torch.logical_and(
             torch.logical_and(points_2d[..., 0] <= self.width - 1, points_2d[..., 0] >= 0),
@@ -205,4 +205,51 @@ class Fisheye(Camera):
         return points_2d, valid_points, points_depth
 
     def im_to_cam(self, points_2d: torch.Tensor, depth: torch.Tensor) -> torch.Tensor:
+        u = points_2d[..., 0]
+        v = points_2d[..., 1]
+
+        x = (u - self.cx) / self.fx
+        y = (v - self.cy) / self.fy
+
+        theta_d = torch.sqrt(x ** 2 + y ** 2)
+        theta_d == torch.min(torch.max(-torch.pi / 2, theta_d), torch.pi / 2)
+
+        theta = theta_d
+
+        for _ in range(self.max_count):
+            theta2 = theta * theta
+            theta4 = theta2 * theta2
+            theta6 = theta4 * theta2
+            theta8 = theta6 * theta2
+            k0_theta2 = self.distortion[0] * theta2
+            k1_theta4 = self.distortion[1] * theta4
+            k2_theta6 = self.distortion[2] * theta6
+            k3_theta8 = self.distortion[3] * theta8
+            theta_fix = (
+                (theta * (1 + k0_theta2 + k1_theta4 + k2_theta6 + k3_theta8) - theta_d)
+                / (1 + 3 * k0_theta2 + 5 * k1_theta4 + 7 * k2_theta6 + 9 * k3_theta8)
+            )
+            theta = theta - theta_fix
+
+            if torch.all(abs(theta_fix) < self.eps):
+                break
+
+        scale = torch.tan(theta) / theta_d
+
+        theta_flipped = torch.logical_or(
+            torch.logical_and(theta_d < 0, theta > 0),
+            torch.logical_and(theta_d > 0, theta < 0),
+        )
+
+        x = x * scale
+        y = y * scale
+        z = torch.ones_like(x)
+        z[theta_flipped] = -1e6
+
+        points_3d = torch.stack([x, y, z], dim=-1)
+        return points_3d
+
+
+class VinAIFisheye(Fisheye):
+    def __init__(self, camera_data_file: str):
         pass
