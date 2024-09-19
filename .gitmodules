@@ -1,0 +1,3 @@
+[submodule "VFDepth"]
+	path = VFDepth
+	url = https://github.com/42dot/VFDepth.git

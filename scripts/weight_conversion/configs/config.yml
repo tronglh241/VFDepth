@@ -1,0 +1,10 @@
+org:
+  config_file: VFDepth/configs/nuscenes/nusc_surround_fusion.yaml
+  log_dir: results
+  weights: weights_9
+  models_to_load:
+    - depth_net
+    - pose_net
+output:
+  dirname: checkpoints/weights
+  filename: vfdepth

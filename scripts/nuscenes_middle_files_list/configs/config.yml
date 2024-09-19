@@ -1,0 +1,9 @@
+nuscenes:
+  version: v1.0-mini
+  dataroot: ../../../datasets/nuscenes_mini/
+  verbose: True
+scenes:
+  - mini_val
+output:
+  dirname: datasets/file_lists
+  filename: mini_val
