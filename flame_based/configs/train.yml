@@ -24,6 +24,7 @@ data:
           ref_extrinsic_idx: 0
       shuffle: True
       batch_size: 2
+      num_workers: 2
 
   valid:
     module: torch.utils.data
@@ -50,8 +51,9 @@ data:
           ref_extrinsic_idx: 0
       shuffle: False
       batch_size: 2
+      num_workers: 2
 
-  vis:
+  valid_train:
     module: torch.utils.data
     name: DataLoader
     kwargs:
@@ -69,13 +71,14 @@ data:
             - "'CAM_BACK_RIGHT'"
             - "'CAM_BACK'"
           verbose: True
-          token_list_file: "'../dataset/nuscenes/val_vis.txt'"
+          token_list_file: "'../dataset/nuscenes/val_train.txt'"
           mask_dir: "'../dataset/nuscenes_mask'"
           image_shape: (640, 352)
           jittering: (0.0, 0.0, 0.0, 0.0)
           ref_extrinsic_idx: 0
       shuffle: False
       batch_size: 2
+      num_workers: 2
 
 model:
   module: models.vf_depth

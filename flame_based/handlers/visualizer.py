@@ -1,9 +1,9 @@
-import math
+import torch.nn.functional as F
 from pathlib import Path
 from typing import Callable, Tuple
-
+import torch
+from torchvision.utils import make_grid
 import cv2
-import numpy as np
 from flame.handlers import Handler
 from ignite.engine import Events
 from matplotlib import cm
@@ -37,7 +37,7 @@ class Visualizer(Handler):
 
         self.grid_nrow = grid_nrow
         self.output_transform = output_transform
-        self.cmap = cm.get_cmap('plasma')
+        self.cmap = torch.Tensor(cm.get_cmap('plasma').colors)
 
         actions = []
 
@@ -84,42 +84,25 @@ class Visualizer(Handler):
 
     def save_depth_map(self, engine):
         depth_maps, images = self.output_transform(engine.state.output)
+        depth_maps = torch.matmul(
+            F.one_hot(torch.round(depth_maps * 255.0).to(torch.int64), num_classes=256).to(torch.float32),
+            self.cmap.to(depth_maps.device),
+        )
+        depth_maps = depth_maps.permute(0, 1, 2, 5, 3, 4).squeeze(2)
+        assert len(depth_maps.shape) == 5
 
         for depth_map, image in zip(depth_maps, images):
-            cam_vis_images = []
-            for cam_depth_map, cam_image in zip(depth_map, image):
-                cam_depth_map = cam_depth_map.detach().cpu().numpy()
-                assert cam_depth_map.shape[0] == 1
+            vis_image = torch.cat([depth_map, image], dim=2)
+            vis_image = make_grid(vis_image, nrow=self.grid_nrow)
 
-                color_depth_map = self.cmap(cam_depth_map[0])[:, :, :3].astype(np.float32)
-                cam_image = cam_image.permute(1, 2, 0).cpu().numpy().astype(np.float32)
+            if vis_image.shape[-2:] != (self.out_resolution[1], self.out_resolution[0]):
+                print("resize")
+                vis_image = F.interpolate(
+                    vis_image.unsqueeze(0),
+                    (self.out_resolution[1], self.out_resolution[0]),
+                ).squeeze(0)
 
-                cam_vis_image = cv2.vconcat([color_depth_map, cam_image])
-                cam_vis_images.append(cam_vis_image)
-
-            num_rows = math.ceil(len(cam_vis_images) / self.grid_nrow)
-            num_cols = self.grid_nrow
-            grid_cell_width = self.out_resolution[0] // num_cols
-            grid_cell_height = self.out_resolution[0] // num_rows
-
-            cam_vis_images = [cv2.resize(im, (grid_cell_width, grid_cell_height)) for im in cam_vis_images]
-
-            vis_images = []
-            for i in range(num_rows):
-                row_images = []
-
-                for j in range(num_cols):
-                    if i * num_cols + j < len(cam_vis_images):
-                        row_images.append(cam_vis_images[i * num_cols + j])
-                    else:
-                        row_images.append(np.zeros((grid_cell_height, grid_cell_width, 3), dtype=float))
-
-                row_image = cv2.hconcat(row_images)
-                vis_images.append(row_image)
-
-            vis_image = cv2.vconcat(vis_images)
-            vis_image = cv2.resize(vis_image, self.out_resolution)
-            vis_image = (vis_image * 255).astype(np.uint8)
-            vis_image = cv2.cvtColor(vis_image, cv2.COLOR_RGB2BGR)
+            vis_image = vis_image[[2, 1, 0]] * 255.0  # RGB to BGR
+            vis_image = vis_image.round().to(torch.uint8).permute(1, 2, 0).cpu().numpy()
 
             self.out_writer.write(vis_image)
