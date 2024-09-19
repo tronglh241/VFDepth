@@ -1,14 +1,14 @@
-from flame_based.models.vf_depth import VFDepth
-from flame_based.datasets.nuscenes_dataset import NuScenesDataset
-from torch.utils.data import DataLoader
-from flame_based.models.view_renderer import ViewRenderer
-from flame_based.losses.multi_cam_loss import MultiCamLoss
 import torch
-from utils.misc import _NUSC_CAM_LIST, get_relcam
-from flame_based.losses.loss_computation_wrapper import LossComputationWrapper
-from models import VFDepthAlgo
-import utils
+from torch.utils.data import DataLoader
 
+import utils
+from flame_based.datasets.nuscenes_dataset import NuScenesDataset
+from flame_based.losses.loss_computation_wrapper import LossComputationWrapper
+from flame_based.losses.multi_cam_loss import MultiCamLoss
+from flame_based.models.vf_depth import VFDepth
+from flame_based.models.view_renderer import ViewRenderer
+from models import VFDepthAlgo
+from utils.misc import _NUSC_CAM_LIST, get_relcam
 
 if __name__ == '__main__':
     cfg = utils.get_config('./configs/nuscenes/nusc_surround_fusion.yaml', mode='train')

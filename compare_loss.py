@@ -3,6 +3,7 @@ import torch
 import utils
 from flame_based.losses.multi_cam_loss import MultiCamLoss
 from models import VFDepthAlgo
+
 _NO_DEVICE_KEYS = ['idx', 'dataset_idx', 'sensor_name', 'filename']
 
 if __name__ == '__main__':

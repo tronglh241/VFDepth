@@ -4,6 +4,7 @@ import utils
 from flame_based.models.view_renderer import ViewRenderer
 from models import VFDepthAlgo
 from utils.misc import _NUSC_CAM_LIST, get_relcam
+
 _NO_DEVICE_KEYS = ['idx', 'dataset_idx', 'sensor_name', 'filename']
 
 if __name__ == '__main__':

@@ -16,8 +16,8 @@ class Camera(ABC):
         pix_coords = torch.stack(grid_xy, axis=0).view(2, height * width).T.contiguous()
 
         assert len(extrinsic.shape) == len(intrinsic.shape)
-        assert extrinsic.shape[-2:] == (4, 4)
-        assert intrinsic.shape[-2:] == (4, 4)
+        assert extrinsic.shape[-2:] == (4, 4), extrinsic.shape[-2:]
+        assert intrinsic.shape[-2:] == (4, 4), intrinsic.shape[-2:]
 
         self.width = width
         self.height = height
@@ -168,7 +168,9 @@ class Fisheye(Camera):
         is_point_front = points_depth > 0
 
         points_2d = points_3d[..., :2] / (points_3d[..., 2:3] + self.eps)
-        r = torch.sqrt(points_2d[..., 0].unsqueeze(-2) @ points_2d[..., 1].unsqueeze(-1))
+        r = torch.sqrt(points_2d.unsqueeze(-2) @ points_2d.unsqueeze(-1)).squeeze(-1).squeeze(-1)
+        assert points_2d.shape[:-1] == r.shape, (points_2d.shape[:-1], r.shape)
+
         theta = torch.arctan(r)
         theta_d = theta * (
             1 + self.distortion[0] * torch.pow(theta, 2)
@@ -176,9 +178,10 @@ class Fisheye(Camera):
             + self.distortion[2] * torch.pow(theta, 6)
             + self.distortion[3] * torch.pow(theta, 8)
         )
+        assert theta_d.shape == points_3d.shape[:-1], (theta_d.shape, points_3d.shape[:-1])
 
-        inv_r = 1.0 / r if r > 1e-8 else 1.0
-        cdist = theta_d * inv_r if r > 1e-8 else 1.0
+        inv_r = torch.where(r > 1e-8, 1.0 / r, 1.0)
+        cdist = torch.where(r > 1e-8, theta_d * inv_r, 1.0)
 
         x = cdist * points_2d[..., 0]
         y = cdist * points_2d[..., 1]
@@ -212,7 +215,7 @@ class Fisheye(Camera):
         y = (v - self.cy) / self.fy
 
         theta_d = torch.sqrt(x ** 2 + y ** 2)
-        theta_d == torch.min(torch.max(-torch.pi / 2, theta_d), torch.pi / 2)
+        theta_d = torch.clamp(theta_d, -torch.pi, torch.pi)
 
         theta = theta_d
 
@@ -247,9 +250,6 @@ class Fisheye(Camera):
         z[theta_flipped] = -1e6
 
         points_3d = torch.stack([x, y, z], dim=-1)
+        assert points_3d.shape == (*points_2d.shape[:-1], 3)
+        points_3d = points_3d.unsqueeze(-2) * depth.unsqueeze(-1)
         return points_3d
-
-
-class VinAIFisheye(Fisheye):
-    def __init__(self, camera_data_file: str):
-        pass
