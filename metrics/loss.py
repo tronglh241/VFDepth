@@ -1,4 +1,3 @@
-from collections import defaultdict
 from typing import Callable, Dict, Sequence, Tuple, Union, cast
 
 import torch
@@ -13,9 +12,8 @@ class Loss(Metric):
         self,
         loss_fn: Callable,
         output_transform: Callable = lambda x: x,
-        device: Union[str, torch.device] = torch.device("cpu"),
     ):
-        super(Loss, self).__init__(output_transform, device=device, skip_unrolling=True)
+        super(Loss, self).__init__(output_transform, skip_unrolling=True)
         self._loss_fn = loss_fn
 
     @reinit__is_reduced
@@ -40,11 +38,11 @@ class Loss(Metric):
             raise ValueError("loss_fn did not return the average loss.")
 
         n = y[0].shape[0]
-        self.total_loss += average_loss.to(self._device) * n
-        self.reproj_loss += self._loss_fn.loss_fn.loss_mean['reproj_loss']
-        self.spatio_loss += self._loss_fn.loss_fn.loss_mean['spatio_loss']
-        self.spatio_tempo_loss += self._loss_fn.loss_fn.loss_mean['spatio_tempo_loss']
-        self.smooth_loss += self._loss_fn.loss_fn.loss_mean['smooth']
+        self.total_loss += average_loss.item() * n
+        self.reproj_loss += self._loss_fn.loss_fn.loss_mean['reproj_loss'] * n
+        self.spatio_loss += self._loss_fn.loss_fn.loss_mean['spatio_loss'] * n
+        self.spatio_tempo_loss += self._loss_fn.loss_fn.loss_mean['spatio_tempo_loss'] * n
+        self.smooth_loss += self._loss_fn.loss_fn.loss_mean['smooth'] * n
 
         self._num_examples += n
 

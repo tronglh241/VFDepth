@@ -1,0 +1,202 @@
+experiment_name: "'test_vinai_overfit_fov180'"
+
+data:
+  test:
+    module: torch.utils.data
+    name: DataLoader
+    kwargs:
+      dataset:
+        module: datasets.fisheyevinai_dataset
+        name: FisheyeVinAIDataset
+        kwargs:
+          dataroot: "'../../datasets/vinai/depth/PA- 3D view at 4 overlap zones When passing throught shade of building or tree_Sunny'"
+          mask_dir: "'datasets/masks/vinaicar'"
+          calib_file: "'../../datasets/vinai/VFe34_Calib_17Feb2023/cameraData.json'"
+          token_list_file: "'../../datasets/vinai/depth/PA- 3D view at 4 overlap zones When passing throught shade of building or tree_Sunny/val.txt'"
+          cam_names:
+            - "'front'"
+            - "'left'"
+            - "'rear'"
+            - "'right'"
+          fovs:
+            front: ((-np.pi / 2, np.pi / 2), (-np.pi / 2, np.pi / 2))
+            left: ((-np.pi / 2, np.pi / 2), (-np.pi / 2, np.pi / 2))
+            rear: ((-np.pi / 2, np.pi / 2), (-np.pi / 2, np.pi / 2))
+            right: ((-np.pi / 2, np.pi / 2), (-np.pi / 2, np.pi / 2))
+          image_shape: (640, 400)
+          jittering: (0.0, 0.0, 0.0, 0.0)
+          ref_extrinsic_idx: 0
+          length: 0
+      shuffle: False
+      batch_size: 4
+      num_workers: 8
+
+model:
+  module: models.vf_depth
+  name: VFDepth
+  kwargs:
+    input_width: 640
+    input_height: 400
+
+engine:
+  module: flame.engine
+  name: Evaluator.factory
+  kwargs:
+    model: model
+    data: data.test
+    device: "'cuda'"
+    prepare_batch: prepare_batch
+    model_fn: >
+      lambda model, x: model(
+        x[0], # prev_image
+        x[1], # cur_image
+        x[2], # next_image
+        x[3], # mask
+        x[4], # intrinsic
+        x[5], # extrinsic
+        x[7], # ref_extrinsic
+        x[6], # distortion
+        x[11], # fov
+      )
+
+loss_computation_wrapper:
+  module: losses.loss_computation_wrapper
+  name: LossComputationWrapper
+  kwargs:
+    model: model
+    loss_fn:
+      module: losses.multi_cam_loss
+      name: MultiCamLoss
+      kwargs:
+        disparity_smoothness: 0.001
+        spatio_coeff: 0.03
+        spatio_tempo_coeff: 0.1
+    max_depth: 80.0
+    min_depth: 1.5
+    focal_length_scale: 300.0
+    neighbor_cam_indices_map:
+      0: [3, 1]
+      1: [0, 2]
+      2: [1, 3]
+      3: [2, 0]
+
+loss_fn:
+  module: flame.loss
+  name: Loss
+  kwargs:
+    loss_fn: loss_computation_wrapper
+    output_transform: >
+      lambda output: (
+        output[1][8], # org_prev_images
+        output[1][9], # org_cur_images
+        output[1][10], # org_next_images
+        output[1][3], # masks
+        output[0][2], # depth_maps
+        output[1][4], # intrinsics
+        output[1][5], # extrinsics
+        output[0][0], # cur_to_prev_poses
+        output[0][1], # cur_to_next_poses
+        output[1][6], # distortions
+        output[1][11], # fovs
+      )
+
+metrics:
+  module: flame.handlers
+  name: Metrics
+  kwargs:
+    evaluators:
+      - engine
+    metrics:
+      loss:
+        module: metrics.loss
+        name: Loss
+        kwargs:
+          loss_fn: loss_fn
+
+visualization:
+  module: handlers.visualizer
+  name: Visualizer
+  kwargs:
+    trainer: engine
+    evaluator: engine
+    out_dir: "f'output/{experiment_name}/vis'"
+    out_name: "'visualization_val'"
+    out_resolution: (1286, 1606)  # vinai
+    view_out_resolution: (1928, 1606)  # vinai
+    fps: 2
+    file_ext: "'mp4'"
+    fourcc: "'mp4v'"
+    grid_nrow: 2
+    output_transform: 'lambda x: (x[0][2], x[1][9])'
+    view_renderer: loss_computation_wrapper.view_renderer
+
+predictor:
+  module: handlers.predictor
+  name: Predictor
+  kwargs:
+    trainer: engine
+    evaluator: engine
+    compute_true_depth_maps: loss_computation_wrapper.compute_true_depth_maps
+    out_dir: "f'output/{experiment_name}/point_clouds'"
+    out_name: "'pcd_val'"
+    depth_limit: 50
+    output_transform: >
+      lambda output: (
+        output[0][2], # depth_maps
+        output[1][8], # images
+        output[1][3], # masks
+        output[1][4], # intrinsics
+        output[1][5], # extrinsics
+        output[1][6], # distortions
+        output[1][11], # fovs
+      )
+
+logging:
+  progress_bar:
+    module: flame.handlers
+    name: ProgressBar
+    kwargs:
+      evaluators:
+        test: engine
+      metric_names:
+        - "'total_loss'"
+
+  tensorboard:
+    module: flame.handlers
+    name: Tensorboard
+    kwargs:
+      log_dir: "f'runs/{experiment_name}'"
+      logger_handlers:
+        - engine: engine
+          event_name: Events.EPOCH_COMPLETED
+          log_handler:
+            module: ignite.contrib.handlers.tensorboard_logger
+            name: OutputHandler
+            kwargs:
+              tag: "'evaluation/test'"
+              metric_names:
+                - "'total_loss'"
+                - "'reproj_loss'"
+                - "'spatio_loss'"
+                - "'spatio_tempo_loss'"
+                - "'smooth_loss'"
+              global_step_transform: global_step_from_engine(engine, Events.EPOCH_COMPLETED)
+
+checkpoint:
+  loader:
+    module: flame.handlers
+    name: CheckpointLoader
+    kwargs:
+      path: "'checkpoints/train_vinai_overfit_fov180/241004022116/model_backup_checkpoint_100.pt'"
+
+extralibs:
+  prepare_batch:
+    module: datasets.utils
+    name: prepare_batch
+  Events:
+    module: ignite.engine
+    name: Events
+  global_step_from_engine:
+    module: ignite.handlers
+    name: global_step_from_engine
+  np: numpy

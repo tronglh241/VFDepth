@@ -7,8 +7,8 @@ data:
         module: datasets.nuscenes_dataset
         name: NuScenesDataset
         kwargs:
-          version: "'v1.0-trainval'"
-          dataroot: "'../../../datasets/nuscenes/'"
+          version: "'v1.0-mini'"
+          dataroot: "'../../datasets/nuscenes_mini'"
           cam_names:
             - "'CAM_FRONT'"
             - "'CAM_FRONT_LEFT'"
@@ -17,13 +17,14 @@ data:
             - "'CAM_BACK_RIGHT'"
             - "'CAM_BACK'"
           verbose: True
-          token_list_file: "'../dataset/nuscenes/train.txt'"
-          mask_dir: "'../dataset/nuscenes_mask'"
+          token_list_file: "'datasets/file_lists/nuscenes/mini_train.txt'"
+          mask_dir: "'datasets/masks/nuscenes'"
           image_shape: (640, 352)
           jittering: (0.2, 0.2, 0.2, 0.05)
           ref_extrinsic_idx: 0
       shuffle: True
       batch_size: 4
+      num_workers: 8
 
   valid:
     module: ignite.distributed.auto
@@ -33,8 +34,8 @@ data:
         module: datasets.nuscenes_dataset
         name: NuScenesDataset
         kwargs:
-          version: "'v1.0-trainval'"
-          dataroot: "'../../../datasets/nuscenes/'"
+          version: "'v1.0-mini'"
+          dataroot: "'../../datasets/nuscenes_mini'"
           cam_names:
             - "'CAM_FRONT'"
             - "'CAM_FRONT_LEFT'"
@@ -43,39 +44,41 @@ data:
             - "'CAM_BACK_RIGHT'"
             - "'CAM_BACK'"
           verbose: True
-          token_list_file: "'../dataset/nuscenes/val.txt'"
-          mask_dir: "'../dataset/nuscenes_mask'"
+          token_list_file: "'datasets/file_lists/nuscenes/mini_val.txt'"
+          mask_dir: "'datasets/masks/nuscenes'"
           image_shape: (640, 352)
           jittering: (0.0, 0.0, 0.0, 0.0)
           ref_extrinsic_idx: 0
       shuffle: False
-      batch_size: 4
+      batch_size: 8
+      num_workers: 16
 
-  vis:
-    module: ignite.distributed.auto
-    name: auto_dataloader
-    kwargs:
-      dataset:
-        module: datasets.nuscenes_dataset
-        name: NuScenesDataset
-        kwargs:
-          version: "'v1.0-trainval'"
-          dataroot: "'../../../datasets/nuscenes/'"
-          cam_names:
-            - "'CAM_FRONT'"
-            - "'CAM_FRONT_LEFT'"
-            - "'CAM_FRONT_RIGHT'"
-            - "'CAM_BACK_LEFT'"
-            - "'CAM_BACK_RIGHT'"
-            - "'CAM_BACK'"
-          verbose: True
-          token_list_file: "'../dataset/nuscenes/val_vis.txt'"
-          mask_dir: "'../dataset/nuscenes_mask'"
-          image_shape: (640, 352)
-          jittering: (0.0, 0.0, 0.0, 0.0)
-          ref_extrinsic_idx: 0
-      shuffle: False
-      batch_size: 4
+  # valid_train:
+  #   module: ignite.distributed.auto
+  #   name: auto_dataloader
+  #   kwargs:
+  #     dataset:
+  #       module: datasets.nuscenes_dataset
+  #       name: NuScenesDataset
+  #       kwargs:
+  #         version: "'v1.0-mini'"
+  #         dataroot: "'../../datasets/nuscenes_mini'"
+  #         cam_names:
+  #           - "'CAM_FRONT'"
+  #           - "'CAM_FRONT_LEFT'"
+  #           - "'CAM_FRONT_RIGHT'"
+  #           - "'CAM_BACK_LEFT'"
+  #           - "'CAM_BACK_RIGHT'"
+  #           - "'CAM_BACK'"
+  #         verbose: True
+  #         token_list_file: "'datasets/file_lists/nuscenes/mini_val.txt'"
+  #         mask_dir: "'datasets/masks/nuscenes'"
+  #         image_shape: (640, 352)
+  #         jittering: (0.0, 0.0, 0.0, 0.0)
+  #         ref_extrinsic_idx: 0
+  #     shuffle: False
+  #     batch_size: 4
+  #     num_workers: 8
 
 model:
   module: ignite.distributed.auto
@@ -191,26 +194,28 @@ evaluators:
     event: Events.EPOCH_COMPLETED
     function: run
     rank: -1
-  vis:
-    module: flame.engine
-    name: Evaluator.factory
-    kwargs:
-      model: model
-      data: data.vis
-      device: "'cuda'"
-      prepare_batch: prepare_batch
-      model_fn: >
-        lambda model, x: model(
-          x[7], # prev_image
-          x[8], # cur_image
-          x[9], # next_image
-          x[3], # mask
-          x[4], # intrinsic
-          x[5], # extrinsic
-          x[6], # ref_extrinsic
-        )
-    event: Events.EPOCH_COMPLETED
-    function: run
+  # valid_train:
+  #   module: flame.engine
+  #   name: Evaluator.factory
+  #   kwargs:
+  #     model: model
+  #     data: data.valid_train
+  #     device: "'cuda'"
+  #     prepare_batch: prepare_batch
+  #     model_fn: >
+  #       lambda model, x: model(
+  #         x[7], # prev_image
+  #         x[8], # cur_image
+  #         x[9], # next_image
+  #         x[3], # mask
+  #         x[4], # intrinsic
+  #         x[5], # extrinsic
+  #         x[6], # ref_extrinsic
+  #       )
+  #   event: Events.ITERATION_COMPLETED(every=10)
+  #   function: run
+  #   rank: -1
+    # barrier: True
 
 metrics:
   module: flame.handlers
@@ -218,6 +223,7 @@ metrics:
   kwargs:
     evaluators:
       - evaluators.valid
+      # - evaluators.valid_train
     metrics:
       loss:
         module: metrics.loss
@@ -243,15 +249,18 @@ visualization:
   name: Visualizer
   kwargs:
     trainer: engine
-    evaluator: evaluators.vis
-    out_dir: "'./output'"
-    out_name: "'vis'"
-    out_resolution: (1472, 1080)
+    evaluator: evaluators.valid
+    # evaluator: evaluators.valid_train
+    out_dir: "'output/vis'"
+    out_name: "'mini_train'"
+    # out_resolution: (1472, 1080)
+    out_resolution: (1928, 1414)
     fps: 2
     file_ext: "'mp4'"
     fourcc: "'mp4v'"
     grid_nrow: 3
     output_transform: 'lambda x: (x[0][2], x[1][1])'
+    event_name: Events.EPOCH_COMPLETED
 
 logging:
   progress_bar:
@@ -261,6 +270,7 @@ logging:
       trainer: engine
       evaluators:
         valid: evaluators.valid
+        # valid_train: evaluators.valid_train
       metric_names:
         - "'total_loss'"
 
@@ -278,13 +288,29 @@ logging:
             kwargs:
               optimizer: optimizer
         - engine: engine
-          event_name: Events.ITERATION_COMPLETED
+          event_name: Events.ITERATION_COMPLETED(every=5)
           log_handler:
             module: ignite.contrib.handlers.tensorboard_logger
             name: OutputHandler
             kwargs:
               tag: "'training'"
               output_transform: "lambda loss: {'loss': loss}"
+        # - engine: evaluators.valid_train
+        #   event_name: Events.EPOCH_COMPLETED
+        #   log_handler:
+        #     module: ignite.contrib.handlers.tensorboard_logger
+        #     name: OutputHandler
+        #     kwargs:
+        #       tag: "'evaluation/valid_train'"
+        #       metric_names:
+        #         - "'total_loss'"
+        #         - "'reproj_loss'"
+        #         - "'spatio_loss'"
+        #         - "'spatio_tempo_loss'"
+        #         - "'smooth_loss'"
+        #       global_step_transform: global_step_from_engine(engine, Events.ITERATION_COMPLETED)
+        #   rank: 0
+        #   barrier: True
         - engine: evaluators.valid
           event_name: Events.EPOCH_COMPLETED
           log_handler:
@@ -292,7 +318,12 @@ logging:
             name: OutputHandler
             kwargs:
               tag: "'evaluation/valid'"
-              metric_names: "'all'"
+              metric_names:
+                - "'total_loss'"
+                - "'reproj_loss'"
+                - "'spatio_loss'"
+                - "'spatio_tempo_loss'"
+                - "'smooth_loss'"
               global_step_transform: global_step_from_engine(engine, Events.EPOCH_COMPLETED)
         - engine: engine
           event_name: Events.EPOCH_COMPLETED
@@ -327,7 +358,7 @@ checkpoint:
       dirname: "'checkpoints/'"
       score_name: "'total_loss'"
       mode: "'min'"
-      n_saved: 1
+      n_saved: 10
       global_step_transform: global_step_from_engine(engine, Events.EPOCH_COMPLETED)
 
   backup:
@@ -361,7 +392,7 @@ checkpoint:
 
 extralibs:
   prepare_batch:
-    module: utils
+    module: datasets.utils
     name: prepare_batch
   Events:
     module: ignite.engine

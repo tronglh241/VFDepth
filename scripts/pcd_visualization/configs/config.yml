@@ -1,0 +1,14 @@
+input:
+  dir_path: output/test_nuscenes/point_clouds
+  pattern: '*.ply'
+output:
+  out_dir: output/test_nuscenes
+  out_name: pcd_vis_crop
+  fps: 2
+  width: 800
+  height: 800
+visualization:
+  point_size: 2.0
+  min_bound: [-10, -10, -0.5]
+  max_bound: [40, 10, 8]
+camera_param_file: scripts/pcd_visualization/configs/camera_params.json

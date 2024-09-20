@@ -69,6 +69,8 @@ class FusedDepthNet(nn.Module):
         resnet_pretrained: bool = True,
         fusion_level: int = 2,  # zero-based level, Resnet has 5-layer, e.g, 2 means 3rd layer.
         fusion_feat_in_dim: int = 256,  # number of channels of fused feature map for each input image
+        input_width: int = 640,
+        input_height: int = 352,
         use_skips: bool = False,
     ):
         super(FusedDepthNet, self).__init__()
@@ -89,7 +91,12 @@ class FusedDepthNet(nn.Module):
 
         # fusion net
         fusion_feat_out_dim = self.encoder.num_ch_enc[fusion_level]
-        self.fusion_net = DepthVFNet(fusion_feat_in_dim, fusion_feat_out_dim)
+        self.fusion_net = DepthVFNet(
+            fusion_feat_in_dim,
+            fusion_feat_out_dim,
+            input_width=input_width,
+            input_height=input_height,
+        )
 
         # depth decoder
         num_ch_enc = self.encoder.num_ch_enc[:(fusion_level + 1)]
@@ -103,6 +110,10 @@ class FusedDepthNet(nn.Module):
         mask,
         intrinsic,
         extrinsic,
+        inv_intrinsic=None,
+        inv_extrinsic=None,
+        distortion=None,
+        fov=None,
     ):
         # images (batch_size x num_cams x channels x height x width)
         batch_size, num_cams, _, _, _ = images.shape
@@ -129,10 +140,14 @@ class FusedDepthNet(nn.Module):
 
         # fusion_net, backproject each feature into the 3D voxel space
         voxel_feat = self.fusion_net(
-            mask,
-            intrinsic,
-            extrinsic,
-            feats_agg,
+            mask=mask,
+            intrinsic=intrinsic,
+            extrinsic=extrinsic,
+            feats_agg=feats_agg,
+            inv_intrinsic=inv_intrinsic,
+            inv_extrinsic=inv_extrinsic,
+            distortion=distortion,
+            fov=fov,
         )
 
         feat_in = packed_feats[:self.fusion_level] + [voxel_feat]

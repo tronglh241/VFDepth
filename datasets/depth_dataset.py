@@ -43,14 +43,14 @@ class DepthDataset(Dataset):
         masks = [self.load_mask(file) for file in mask_files]
 
         (
-            prev_images,
-            cur_images,
-            next_images,
             aug_prev_images,
             aug_cur_images,
             aug_next_images,
             intrinsics,
             extrinsics,
+            prev_images,
+            cur_images,
+            next_images,
         ) = self.sample_transforms(
             prev_images, cur_images, next_images, intrinsics, extrinsics,
         )

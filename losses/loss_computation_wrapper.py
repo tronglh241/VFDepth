@@ -24,6 +24,15 @@ class LossComputationWrapper:
         self.view_renderer = ViewRenderer()
         self.loss_mean = {}
 
+    def compute_true_depth_maps(self, depth_maps, intrinsics):
+        return self.model.compute_true_depth_maps(
+            depth_maps=depth_maps,
+            intrinsic=intrinsics,
+            max_depth=self.max_depth,
+            min_depth=self.min_depth,
+            focal_length_scale=self.focal_length_scale,
+        )
+
     def __call__(
         self,
         org_prev_images,
@@ -33,26 +42,23 @@ class LossComputationWrapper:
         depth_maps,
         intrinsics,
         extrinsics,
-        prev_to_cur_poses,
-        next_to_cur_poses,
+        cur_to_prev_poses,
+        cur_to_next_poses,
+        distortions=None,
+        fovs=None,
     ):
-        true_depth_maps = self.model.compute_true_depth_maps(
-            depth_maps=depth_maps,
-            intrinsic=intrinsics,
-            max_depth=self.max_depth,
-            min_depth=self.min_depth,
-            focal_length_scale=self.focal_length_scale,
-        )
+        true_depth_maps = self.compute_true_depth_maps(depth_maps, intrinsics)
 
         inv_extrinsics = torch.inverse(extrinsics)
         loss = 0
         loss_info = defaultdict(list)
+        self.view_renderer.clear()
 
         for cam_index in range(masks.shape[1]):
             neighbor_cam_indices = self.neighbor_cam_indices_map[cam_index]
             relative_poses = self.model.compute_relative_poses(
-                cam_prev_to_cur_pose=prev_to_cur_poses[:, cam_index],
-                cam_next_to_cur_pose=next_to_cur_poses[:, cam_index],
+                cam_cur_to_prev_pose=cur_to_prev_poses[:, cam_index],
+                cam_cur_to_next_pose=cur_to_next_poses[:, cam_index],
                 cam_inv_extrinsic=inv_extrinsics[:, cam_index],
                 extrinsic=extrinsics,
                 neighbor_cam_indices=neighbor_cam_indices,
@@ -64,12 +70,14 @@ class LossComputationWrapper:
                 mask=masks,
                 intrinsic=intrinsics,
                 true_depth_map=true_depth_maps,
-                prev_to_cur_pose=prev_to_cur_poses,
-                next_to_cur_pose=next_to_cur_poses,
+                cur_to_prev_pose=cur_to_prev_poses,
+                cur_to_next_pose=cur_to_next_poses,
                 cam_index=cam_index,
                 neighbor_cam_indices=neighbor_cam_indices,
                 rel_pose_dict=relative_poses,
                 extrinsic=extrinsics,
+                distortion=distortions,
+                fov=fovs,
             )
             cam_loss, loss_dict = self.loss_fn(
                 cam_org_prev_image=org_prev_images[:, cam_index],

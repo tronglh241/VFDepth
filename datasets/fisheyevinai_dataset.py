@@ -1,44 +1,32 @@
-import os
-import tempfile
-import warnings
+import json
 from pathlib import Path
-from typing import List, Tuple
+from typing import Dict, List, Tuple
 
 import numpy as np
 import torch
-from nuscenes.nuscenes import NuScenes
 from PIL.Image import Image
-from pyquaternion import Quaternion
 from torchvision import transforms
 
 from .depth_dataset import DepthDataset
 from .transforms import get_transforms
 
 
-class NuScenesDataset(DepthDataset):
+class FisheyeVinAIDataset(DepthDataset):
     def __init__(
         self,
-        version: str = 'v1.0-mini',
-        dataroot: str = '/data/sets/nuscenes',
-        verbose: bool = True,
-        cam_names: List[str] = [
-            'CAM_FRONT', 'CAM_FRONT_LEFT', 'CAM_FRONT_RIGHT',
-            'CAM_BACK_LEFT', 'CAM_BACK_RIGHT', 'CAM_BACK',
-        ],
+        dataroot: str,
         mask_dir: str = '',
+        calib_file: str = '',
         token_list_file: str = '',
-        image_shape: Tuple[int, int] = (640, 352),  # (width, height)
+        cam_names: List[str] = ['front', 'left', 'rear', 'right'],
+        fovs: Dict[str, Tuple[Tuple[float, float], Tuple[float, float]]] = None,
+        image_shape: Tuple[int, int] = (640, 400),  # (width, height)
         jittering: Tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0),  # (brightness, contrast, saturation, hue)
         crop_train_borders: Tuple[float, float, float, float] = (),  # (left, top, right, down)
         crop_eval_borders: Tuple[float, float, float, float] = (),  # (left, top, right, down)
         ref_extrinsic_idx: int = 0,
         length: int = 0,
     ):
-        self.dataset = NuScenes(
-            version=version,
-            dataroot=dataroot,
-            verbose=verbose,
-        )
         self.dataroot = Path(dataroot)
         self.mask_dir = Path(mask_dir)
 
@@ -51,34 +39,19 @@ class NuScenesDataset(DepthDataset):
             raise FileNotFoundError(f'{token_list_file} not found.')
 
         with token_list_file.open() as f:
-            token_list = [line.strip() for line in f]
-
-        fd, ignored_file = tempfile.mkstemp(suffix='.txt', prefix='ignored_files', text=True)
-        file_ignored = False
-
-        self.token_list = []
-        with os.fdopen(fd, mode='w') as f:
-            for token in token_list:
-                sample = self.dataset.get('sample', token)
-
-                if sample['prev'] != '' and sample['next'] != '':
-                    self.token_list.append(token)
-                else:
-                    file_ignored = True
-                    f.write(f'{token}\n')
+            self.token_list = [line.strip() for line in f]
 
         if length > 0:
             self.token_list = self.token_list[:length]
 
-        if file_ignored:
-            warnings.warn(f'Ignored samples are listed in file {ignored_file}.')
-        else:
-            os.remove(ignored_file)
+        self.calib_info = self.load_calib(calib_file)
 
         # SUPPORTED_MODE = ['train', 'validation', 'test']
         mode = 'train'  # hard-coded to always resize input
 
         width, height = image_shape
+        self.cam_names = cam_names
+        self.ref_extrinsic_idx = ref_extrinsic_idx
         self._transforms = get_transforms(
             mode=mode,
             image_shape=(height, width),
@@ -86,9 +59,31 @@ class NuScenesDataset(DepthDataset):
             crop_train_borders=crop_train_borders,
             crop_eval_borders=crop_eval_borders,
         )
-        self.cam_names = cam_names
-        self.ref_extrinsic_idx = ref_extrinsic_idx
-        super(NuScenesDataset, self).__init__(
+
+        for token in self.token_list:
+            for cam_name in self.cam_names:
+                assert self.dataroot.joinpath(
+                    token, f'{cam_name}_current.jpg'
+                ).exists(), f'Files not found, token {token}.'
+                assert self.dataroot.joinpath(
+                    token, f'{cam_name}_prev.jpg'
+                ).exists(), f'Files not found, token {token}.'
+                assert self.dataroot.joinpath(
+                    token, f'{cam_name}_next.jpg'
+                ).exists(), f'Files not found, token {token}.'
+
+        if fovs is None:
+            self.fovs = {
+                cam_name: torch.Tensor([
+                    [-torch.pi / 2, torch.pi / 2],
+                    [-torch.pi / 2, torch.pi / 2],
+                ])
+                for cam_name in cam_names
+            }
+        else:
+            self.fovs = {k: torch.Tensor(v) for k, v in fovs.items()}
+
+        super(FisheyeVinAIDataset, self).__init__(
             sample_transforms=self._sample_transforms,
             mask_transforms=self._mask_transforms,
         )
@@ -142,7 +137,7 @@ class NuScenesDataset(DepthDataset):
             original_next_images,
         )
 
-    def _mask_transforms(self, masks: List[Image]):
+    def _mask_transforms(self, masks):
         image_shape = self._transforms.keywords['image_shape']
         resize_transform = transforms.Resize(image_shape, interpolation=transforms.InterpolationMode.BILINEAR)
         tensor_transform = transforms.ToTensor()
@@ -156,11 +151,56 @@ class NuScenesDataset(DepthDataset):
 
         return transformed_masks
 
+    def load_calib(self, cam_data_file):
+        cam_mapping = {
+            'left': 0,
+            'front': 1,
+            'rear': 2,
+            'right': 3,
+        }
+
+        with open(cam_data_file) as f:
+            cam_data = json.load(f)
+            cam_data = {data['camPos']: data for data in cam_data['Items']}
+
+        calib_info = {}
+
+        for cam_name in cam_mapping:
+            pos = cam_mapping[cam_name]
+            data = cam_data[pos]
+            R = np.array(data['matrixR']).reshape(3, 3)
+            T = np.array([data['vectT']])
+            extrinsic = np.concatenate((R, T.T), axis=1)
+            extrinsic = np.concatenate((extrinsic, np.zeros((1, 4))), axis=0)
+            extrinsic[-1, -1] = 1.0
+
+            K = np.array(data['matrixK'])
+            intrinsic = np.zeros((3, 3))
+            intrinsic[0, 0] = K[0]
+            intrinsic[0, 2] = K[1]
+            intrinsic[1, 1] = K[2]
+            intrinsic[1, 2] = K[3]
+            intrinsic[2, 2] = 1.0
+
+            distortion = data['matrixD']
+
+            extrinsic = torch.Tensor(extrinsic)
+            intrinsic = torch.Tensor(intrinsic)
+            distortion = torch.Tensor(distortion)
+
+            calib_info[cam_name] = {
+                'extrinsic': extrinsic,
+                'intrinsic': intrinsic,
+                'distortion': distortion,
+            }
+
+        return calib_info
+
     def __len__(self):
         return len(self.token_list)
 
     def __getitem__(self, idx):
-        sample = self.dataset.get('sample', self.token_list[idx])
+        token = self.token_list[idx]
 
         prev_image_files = []
         cur_image_files = []
@@ -168,24 +208,19 @@ class NuScenesDataset(DepthDataset):
         mask_files = []
         intrinsics = []
         extrinsics = []
+        distortions = []
+        fovs = []
 
         for cam_name in self.cam_names:
-            cur_sample_data = self.dataset.get('sample_data', sample['data'][cam_name])
-            cur_image_file = self.dataroot.joinpath(cur_sample_data['filename'])
-
-            prev_sample_data = self.dataset.get('sample_data', cur_sample_data['prev'])
-            prev_image_file = self.dataroot.joinpath(prev_sample_data['filename'])
-
-            next_sample_data = self.dataset.get('sample_data', cur_sample_data['next'])
-            next_image_file = self.dataroot.joinpath(next_sample_data['filename'])
-
+            cur_image_file = self.dataroot.joinpath(token, f'{cam_name}_current.jpg')
+            prev_image_file = self.dataroot.joinpath(token, f'{cam_name}_prev.jpg')
+            next_image_file = self.dataroot.joinpath(token, f'{cam_name}_next.jpg')
             mask_file = self.mask_dir.joinpath(f'{cam_name}.png')
 
-            cam_param = self.dataset.get('calibrated_sensor', cur_sample_data['calibrated_sensor_token'])
-            intrinsic = np.array(cam_param['camera_intrinsic'], dtype=np.float32)
-            extrinsic = Quaternion(cam_param['rotation']).transformation_matrix
-            extrinsic[:3, 3] = np.array(cam_param['translation'])
-            extrinsic = extrinsic.astype(np.float32)
+            intrinsic = self.calib_info[cam_name]['intrinsic']
+            extrinsic = self.calib_info[cam_name]['extrinsic']
+            distortion = self.calib_info[cam_name]['distortion']
+            fov = self.fovs[cam_name]
 
             prev_image_files.append(prev_image_file)
             cur_image_files.append(cur_image_file)
@@ -193,6 +228,8 @@ class NuScenesDataset(DepthDataset):
             mask_files.append(mask_file)
             intrinsics.append(intrinsic)
             extrinsics.append(extrinsic)
+            distortions.append(distortion)
+            fovs.append(fov)
 
         (
             prev_images,
@@ -215,9 +252,8 @@ class NuScenesDataset(DepthDataset):
             ref_extrinsic_idx=self.ref_extrinsic_idx,
         )
 
-        # nuScenes only
-        extrinsics = torch.inverse(extrinsics)
-        ref_extrinsic = torch.inverse(ref_extrinsic)
+        distortions_tensor = torch.stack(distortions)
+        fovs_tensor = torch.stack(fovs)
 
         return (
             prev_images,
@@ -226,8 +262,10 @@ class NuScenesDataset(DepthDataset):
             masks,
             intrinsics,
             extrinsics,
+            distortions_tensor,
             ref_extrinsic,
             org_prev_images,
             org_cur_images,
             org_next_images,
+            fovs_tensor,
         )

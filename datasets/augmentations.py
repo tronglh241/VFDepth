@@ -5,7 +5,6 @@ import random
 import cv2
 import numpy as np
 import torchvision.transforms as transforms
-from PIL import Image
 
 from .misc import filter_dict
 from .types_utils import is_seq
@@ -13,7 +12,7 @@ from .types_utils import is_seq
 ########################################################################################################################
 
 
-def resize_image(image, shape, interpolation=Image.ANTIALIAS):
+def resize_image(image, shape, interpolation=transforms.InterpolationMode.LANCZOS):
     """
     Resizes input image.
 
@@ -102,7 +101,7 @@ def resize_depth_preserve(depth, shape):
 
 
 def resize_sample_image_and_intrinsics(sample, shape,
-                                       image_interpolation=Image.ANTIALIAS):
+                                       image_interpolation=transforms.InterpolationMode.LANCZOS):
     """
     Resizes the image and intrinsics of a sample
 
@@ -146,7 +145,7 @@ def resize_sample_image_and_intrinsics(sample, shape,
     return sample
 
 
-def resize_sample(sample, shape, image_interpolation=Image.ANTIALIAS):
+def resize_sample(sample, shape, image_interpolation=transforms.InterpolationMode.LANCZOS):
     """
     Resizes a sample, including image, intrinsics and depth maps.
 

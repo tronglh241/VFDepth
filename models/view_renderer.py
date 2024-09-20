@@ -1,20 +1,33 @@
 import torch
 import torch.nn.functional as F
-from torch import nn
 
-from .camera import PinHole
+from .camera import Fisheye, PinHole
 
 
-class ViewRenderer(nn.Module):
+class ViewRenderer:
+    def __init__(self):
+        self.warped_views = []
+
+    def clear(self):
+        self.warped_views.clear()
+
     def get_virtual_image(
         self,
         src_img,
         src_mask,
         dst_depth,
         src_intrinsic,
-        src_to_dst_transform,
+        dst_to_src_transform,
         dst_intrinsic,
         dst_extrinsic,
+        src_inv_intrinsic=None,
+        src_inv_extrinsic=None,
+        dst_inv_intrinsic=None,
+        dst_inv_extrinsic=None,
+        src_distortion=None,
+        dst_distortion=None,
+        src_fov=None,
+        dst_fov=None,
     ):
         """
         This function warps source image to target image using backprojection and reprojection process.
@@ -23,34 +36,62 @@ class ViewRenderer(nn.Module):
         # dst_depth (batch_size, 1, height, width)
         batch_size, _, height, width = dst_depth.shape
 
-        dst_pin_hole = PinHole(
-            width=width,
-            height=height,
-            extrinsic=dst_extrinsic,
-            intrinsic=dst_intrinsic,
-        )
-        src_pin_hole = PinHole(
-            width=width,
-            height=height,
-            extrinsic=src_to_dst_transform,
-            intrinsic=src_intrinsic,
-        )
+        if dst_distortion is None:
+            dst_camera = PinHole(
+                width=width,
+                height=height,
+                extrinsic=dst_extrinsic,
+                intrinsic=dst_intrinsic,
+                inv_intrinsic=dst_inv_intrinsic,
+                inv_extrinsic=dst_inv_extrinsic,
+                fov=dst_fov,
+            )
+            src_camera = PinHole(
+                width=width,
+                height=height,
+                extrinsic=dst_to_src_transform,
+                intrinsic=src_intrinsic,
+                inv_intrinsic=src_inv_intrinsic,
+                inv_extrinsic=src_inv_extrinsic,
+                fov=src_fov,
+            )
+        else:
+            dst_camera = Fisheye(
+                width=width,
+                height=height,
+                extrinsic=dst_extrinsic,
+                intrinsic=dst_intrinsic,
+                distortion=dst_distortion,
+                fov=dst_fov,
+            )
+            src_camera = Fisheye(
+                width=width,
+                height=height,
+                extrinsic=dst_to_src_transform,
+                intrinsic=src_intrinsic,
+                distortion=src_distortion,
+                fov=src_fov,
+            )
 
-        points_3d = dst_pin_hole.im_to_cam_map(dst_depth.permute(0, 2, 3, 1))
+        points_3d, valid_points_3d = dst_camera.im_to_cam_map(dst_depth.permute(0, 2, 3, 1), src_mask)
         # points_3d (batch_size, height, width, 1, 3)
         assert points_3d.shape[-2] == 1
 
         points_3d = points_3d.squeeze(-2)
         points_3d = points_3d.view(batch_size, height * width, 3)
+        valid_points_3d = valid_points_3d.view(batch_size, height * width)
 
-        pix_coords, _, _ = src_pin_hole.world_to_im(points_3d)
+        pix_coords, valid_points_2d, _ = src_camera.world_to_im(points_3d)
         assert pix_coords.shape == (batch_size, width * height, 2)
+        pix_coords = torch.where(valid_points_2d.unsqueeze(-1) * valid_points_3d.unsqueeze(-1) > 0.5, pix_coords, -10)
         pix_coords = pix_coords.view(batch_size, height, width, 2)
+        pix_coords = torch.where(src_mask.permute(0, 2, 3, 1) > 0.5, pix_coords, -10)
 
         img_warped = F.grid_sample(src_img, pix_coords, mode='bilinear',
                                    padding_mode='zeros', align_corners=True)
         mask_warped = F.grid_sample(src_mask, pix_coords, mode='nearest',
                                     padding_mode='zeros', align_corners=True)
+        # breakpoint()
 
         # nan handling
         inf_img_regions = torch.isnan(img_warped)
@@ -93,7 +134,7 @@ class ViewRenderer(nn.Module):
         norm_warp = (warp_img - w_mean) / (w_std + 1e-8) * s_std + s_mean
         return norm_warp * warp_mask.float()
 
-    def forward(
+    def __call__(
         self,
         org_prev_image,
         org_cur_image,
@@ -101,12 +142,14 @@ class ViewRenderer(nn.Module):
         mask,
         intrinsic,
         true_depth_map,
-        prev_to_cur_pose,
-        next_to_cur_pose,
+        cur_to_prev_pose,
+        cur_to_next_pose,
         cam_index,
         neighbor_cam_indices,
         rel_pose_dict,
         extrinsic,
+        distortion=None,
+        fov=None,
     ):
         # predict images for each scale(default = scale 0 only)
         # source_scale = 0
@@ -116,6 +159,8 @@ class ViewRenderer(nn.Module):
         ref_mask = mask[:, cam_index]  # inputs['mask'][:, cam, ...]
         ref_K = intrinsic[:, cam_index]  # inputs[('K', source_scale)][:, cam, ...]
         ref_extrinsic = extrinsic[:, cam_index]
+        ref_distortion = distortion[:, cam_index] if distortion is not None else None
+        ref_fov = fov[:, cam_index] if fov is not None else None
 
         # target_view = outputs[('cam', cam)]
         warped_views = {}
@@ -123,19 +168,25 @@ class ViewRenderer(nn.Module):
         ref_depth = true_depth_map[:, cam_index]  # target_view[('depth', scale)]
         for frame_id, T, src_color in zip(
             [-1, 1],
-            [prev_to_cur_pose[:, cam_index], next_to_cur_pose[:, cam_index]],
+            [cur_to_prev_pose[:, cam_index], cur_to_next_pose[:, cam_index]],
             [org_prev_image[:, cam_index], org_next_image[:, cam_index]],
         ):
             # for temporal learning
             src_mask = mask[:, cam_index]  # inputs['mask'][:, cam, ...]
+            src_distortion = distortion[:, cam_index] if distortion is not None else None  # inputs['mask'][:, cam, ...]
+            src_fov = fov[:, cam_index] if fov is not None else None  # inputs['mask'][:, cam, ...]
             warped_img, warped_mask = self.get_virtual_image(
-                src_color,
-                src_mask,
-                ref_depth,
-                ref_K,
-                T,
-                ref_K,
-                ref_extrinsic,
+                src_img=src_color,
+                src_mask=src_mask,
+                dst_depth=ref_depth,
+                src_intrinsic=ref_K,
+                dst_to_src_transform=T,
+                dst_intrinsic=ref_K,
+                dst_extrinsic=ref_extrinsic,
+                src_distortion=src_distortion,
+                dst_distortion=ref_distortion,
+                src_fov=src_fov,
+                dst_fov=ref_fov,
             )
 
             warped_img = self.get_norm_image_single(
@@ -158,19 +209,25 @@ class ViewRenderer(nn.Module):
 
             for cur_index in neighbor_cam_indices:
                 # for partial surround view training
-                src_color = src_colors[:, cur_index, ...]
-                src_mask = mask[:, cur_index, ...]
-                src_intrinsic = intrinsic[:, cur_index, ...]
+                src_color = src_colors[:, cur_index]
+                src_mask = mask[:, cur_index]
+                src_intrinsic = intrinsic[:, cur_index]
+                src_distortion = distortion[:, cur_index] if distortion is not None else None
+                src_fov = fov[:, cur_index] if fov is not None else None
 
                 rel_pose = rel_pose_dict[(frame_id, cur_index)]
                 warped_img, warped_mask = self.get_virtual_image(
-                    src_color,
-                    src_mask,
-                    ref_depth,
-                    src_intrinsic,
-                    rel_pose,
-                    ref_K,
-                    ref_extrinsic,
+                    src_img=src_color,
+                    src_mask=src_mask,
+                    dst_depth=ref_depth,
+                    src_intrinsic=src_intrinsic,
+                    dst_to_src_transform=rel_pose,
+                    dst_intrinsic=ref_K,
+                    dst_extrinsic=ref_extrinsic,
+                    src_distortion=src_distortion,
+                    dst_distortion=ref_distortion,
+                    src_fov=src_fov,
+                    dst_fov=ref_fov,
                 )
 
                 warped_img = self.get_norm_image_single(
@@ -187,4 +244,5 @@ class ViewRenderer(nn.Module):
             warped_views[('overlap', frame_id)] = overlap_img
             warped_views[('overlap_mask', frame_id)] = overlap_mask
 
+        self.warped_views.append(warped_views)
         return warped_views

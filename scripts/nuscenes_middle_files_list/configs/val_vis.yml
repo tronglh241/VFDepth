@@ -1,0 +1,11 @@
+nuscenes:
+  version: v1.0-trainval
+  dataroot: ../../datasets/nuscenes/
+  verbose: True
+scenes: [
+  'scene-0003', 'scene-0012', 'scene-0013', 'scene-0014', 'scene-0015', 'scene-0016', 'scene-0017', 'scene-0018',
+  'scene-0035', 'scene-0036', 'scene-0038', 'scene-0039', 'scene-0092', 'scene-0093', 'scene-0094', 'scene-0095',
+]
+output:
+  dirname: datasets/file_lists/nuscenes
+  filename: val_vis

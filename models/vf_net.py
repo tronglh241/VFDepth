@@ -5,7 +5,7 @@ import torch.nn.functional as F
 from torch import nn
 
 from .blocks import conv1d, conv2d, pack_cam_feat
-from .camera import PinHole
+from .camera import Fisheye, PinHole
 
 
 class VFNet(nn.Module):
@@ -91,9 +91,18 @@ class VFNet(nn.Module):
         intrinsic,
         extrinsic,
         feats_agg,
+        distortion=None,
+        fov=None,
     ):
         # backproject each per-pixel feature into 3D space (or sample per-pixel features for each voxel)
-        voxel_feat_list, voxel_mask_list = self.backproject_into_voxel(feats_agg, mask, intrinsic, extrinsic)
+        voxel_feat_list, voxel_mask_list = self.backproject_into_voxel(
+            feats_agg,
+            mask,
+            intrinsic,
+            extrinsic,
+            distortion=distortion,
+            fov=fov,
+        )
         return voxel_feat_list, voxel_mask_list
 
     def backproject_into_voxel(
@@ -102,6 +111,8 @@ class VFNet(nn.Module):
         input_mask,
         intrinsic,
         extrinsic,
+        distortion=None,
+        fov=None,
     ):
         """
         This function backprojects 2D features into 3D voxel coordinate using intrinsic and extrinsic of each camera.
@@ -119,13 +130,24 @@ class VFNet(nn.Module):
             mask_img = input_mask[:, cam, ...]
             mask_img = F.interpolate(mask_img, [feat_height_2d, feat_width_2d], mode='bilinear', align_corners=True)
 
-            pin_hole = PinHole(
-                width=feat_width_2d,
-                height=feat_height_2d,
-                extrinsic=extrinsic[:, cam],
-                intrinsic=intrinsic[:, cam],
-            )
-            norm_points_2d, valid_points, points_depth = pin_hole.world_to_im(self.voxel_points.to(extrinsic.device))
+            if distortion is None:
+                camera = PinHole(
+                    width=feat_width_2d,
+                    height=feat_height_2d,
+                    extrinsic=extrinsic[:, cam],
+                    intrinsic=intrinsic[:, cam],
+                    fov=fov[:, cam] if fov is not None else None,
+                )
+            else:
+                camera = Fisheye(
+                    width=feat_width_2d,
+                    height=feat_height_2d,
+                    extrinsic=extrinsic[:, cam],
+                    intrinsic=intrinsic[:, cam],
+                    distortion=distortion[:, cam],
+                    fov=fov[:, cam] if fov is not None else None,
+                )
+            norm_points_2d, valid_points, points_depth = camera.world_to_im(self.voxel_points.to(extrinsic.device))
             norm_points_2d = norm_points_2d.unsqueeze(-2)
 
             assert norm_points_2d.shape == (batch_size, self.voxel_points.shape[0], 1, 2)
@@ -211,12 +233,16 @@ class PoseVFNet(VFNet):
         intrinsic,
         extrinsic,
         feats_agg,
+        distortion=None,
+        fov=None,
     ):
         voxel_feat_list, voxel_mask_list = super(PoseVFNet, self).forward(
             mask,
             intrinsic,
             extrinsic,
             feats_agg,
+            distortion=distortion,
+            fov=fov,
         )
 
         # compute overlap region
@@ -284,12 +310,18 @@ class DepthVFNet(VFNet):
         intrinsic,
         extrinsic,
         feats_agg,
+        inv_intrinsic=None,
+        inv_extrinsic=None,
+        distortion=None,
+        fov=None,
     ):
         voxel_feat_list, voxel_mask_list = super(DepthVFNet, self).forward(
             mask,
             intrinsic,
             extrinsic,
             feats_agg,
+            distortion=distortion,
+            fov=fov,
         )
 
         # compute overlap region
@@ -301,7 +333,16 @@ class DepthVFNet(VFNet):
         voxel_feat = voxel_non_overlap + voxel_overlap
 
         # for each pixel, collect voxel features -> output image feature
-        proj_feats = self.project_voxel_into_image(voxel_feat, intrinsic, extrinsic)
+        proj_feats = self.project_voxel_into_image(
+            voxel_feat=voxel_feat,
+            intrinsic=intrinsic,
+            extrinsic=extrinsic,
+            mask=mask,
+            inv_intrinsic=inv_intrinsic,
+            inv_extrinsic=inv_extrinsic,
+            distortion=distortion,
+            fov=fov,
+        )
         proj_feat = pack_cam_feat(torch.stack(proj_feats, 1))
         return proj_feat
 
@@ -341,6 +382,9 @@ class DepthVFNet(VFNet):
         if num_cams == 3:
             feat1 = voxel_feat_list[0]
             feat2 = voxel_feat_list[1] + voxel_feat_list[2]
+        elif num_cams == 4:
+            feat1 = voxel_feat_list[0] + voxel_feat_list[2]
+            feat2 = voxel_feat_list[1] + voxel_feat_list[3]
         elif num_cams == 6:
             feat1 = voxel_feat_list[0] + voxel_feat_list[3] + voxel_feat_list[4]
             feat2 = voxel_feat_list[1] + voxel_feat_list[2] + voxel_feat_list[5]
@@ -357,6 +401,11 @@ class DepthVFNet(VFNet):
         voxel_feat,
         intrinsic,
         extrinsic,
+        mask,
+        inv_intrinsic=None,
+        inv_extrinsic=None,
+        distortion=None,
+        fov=None,
     ):
         """
         This function projects voxels into 2D image coordinate.
@@ -370,19 +419,40 @@ class DepthVFNet(VFNet):
         proj_feats = []
         for cam in range(intrinsic.shape[1]):
             # construct 3D point grid for each view
-            pin_hole = PinHole(
-                width=self.feat_width_2d,
-                height=self.feat_height_2d,
-                extrinsic=extrinsic[:, cam],
-                intrinsic=intrinsic[:, cam],
-            )
+            if distortion is None:
+                camera = PinHole(
+                    width=self.feat_width_2d,
+                    height=self.feat_height_2d,
+                    intrinsic=intrinsic[:, cam],
+                    extrinsic=extrinsic[:, cam],
+                    inv_intrinsic=inv_intrinsic[:, cam] if inv_intrinsic is not None else None,
+                    inv_extrinsic=inv_extrinsic[:, cam] if inv_extrinsic is not None else None,
+                    fov=fov[:, cam] if fov is not None else None,
+                )
+            else:
+                camera = Fisheye(
+                    width=self.feat_width_2d,
+                    height=self.feat_height_2d,
+                    intrinsic=intrinsic[:, cam],
+                    extrinsic=extrinsic[:, cam],
+                    distortion=distortion[:, cam],
+                    fov=fov[:, cam] if fov is not None else None,
+                )
 
-            cam_points = pin_hole.im_to_cam_map(self.depth_grid.to(intrinsic.device))
+            cam_mask = F.interpolate(
+                mask[:, cam],
+                size=(self.feat_height_2d, self.feat_width_2d),
+                mode='bilinear',
+                align_corners=True,
+            )
+            cam_points, valid_points = camera.im_to_cam_map(self.depth_grid.to(intrinsic.device), cam_mask)
             batch_size, height, width, depth_bins, _ = cam_points.shape
-            cam_points = cam_points.reshape(batch_size, height * width * depth_bins, 3)
-            cam_points = pin_hole.cam_to_world(cam_points)
-            cam_points = cam_points.view(batch_size, height * width, depth_bins, 3)
-            cam_points = cam_points.permute(0, 2, 1, 3).reshape(batch_size, depth_bins * height * width, 3)
+            assert valid_points.shape == (batch_size, height, width)
+            cam_points = cam_points.permute(0, 3, 1, 2, 4)
+            cam_points = cam_points.reshape(batch_size, depth_bins * height * width, 3)
+            cam_points = camera.cam_to_world(cam_points)
+            valid_points = torch.stack([valid_points for _ in range(depth_bins)], dim=1)
+            valid_points = valid_points.view(batch_size, depth_bins * height * width, 1)
 
             # 3D grid_sample [b, n_voxels, 3], value: (x, y, z) point
             grid = cam_points
@@ -391,6 +461,7 @@ class DepthVFNet(VFNet):
                 v_length = self.voxel_end_point[i] - self.voxel_start_point[i]
                 grid[:, :, i] = (grid[:, :, i] - self.voxel_start_point[i]) / v_length * 2. - 1.
 
+            grid = torch.where(valid_points, grid, -10)
             grid = grid.view(b, depth_bins, self.feat_height_2d, self.feat_width_2d, 3)
             proj_feat = F.grid_sample(voxel_feat, grid, mode='bilinear', padding_mode='zeros', align_corners=True)
             proj_feat = proj_feat.view(b, depth_bins * self.v_dim_o[-1], self.feat_height_2d, self.feat_width_2d)

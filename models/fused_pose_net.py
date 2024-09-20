@@ -41,6 +41,8 @@ class FusedPoseNet(nn.Module):
         resnet_pretrained: bool = True,
         fusion_level: int = 2,  # zero-based level, Resnet has 5-layer, e.g, 2 means 3rd layer.
         fusion_feat_in_dim: int = 256,  # number of channels of fused feature map for each input image
+        input_width: int = 640,
+        input_height: int = 352,
     ):
         super(FusedPoseNet, self).__init__()
         self.encoder = ResnetEncoder(
@@ -58,7 +60,12 @@ class FusedPoseNet(nn.Module):
 
         # fusion net
         fusion_feat_out_dim = self.encoder.num_ch_enc[fusion_level]
-        self.fusion_net = PoseVFNet(fusion_feat_in_dim, fusion_feat_out_dim)
+        self.fusion_net = PoseVFNet(
+            fusion_feat_in_dim,
+            fusion_feat_out_dim,
+            input_width=input_width,
+            input_height=input_height,
+        )
 
         # depth decoder
         self.decoder = PoseDecoder(
@@ -69,7 +76,16 @@ class FusedPoseNet(nn.Module):
         )
         self.fusion_level = fusion_level
 
-    def forward(self, cur_image, next_image, mask, intrinsic, extrinsic):
+    def forward(
+        self,
+        cur_image,
+        next_image,
+        mask,
+        intrinsic,
+        extrinsic,
+        distortion=None,
+        fov=None,
+    ):
         # cur_image (batch_size x num_cams x channels x height x width)
         # next_image (batch_size x num_cams x channels x height x width)
         assert cur_image.shape == next_image.shape
@@ -103,6 +119,8 @@ class FusedPoseNet(nn.Module):
             intrinsic,
             extrinsic,
             feats_agg,
+            distortion=distortion,
+            fov=fov,
         )
         axis_angle, translation = self.decoder([[bev_feat]])
         return axis_angle, torch.clamp(translation, -4.0, 4.0)  # for DDAD dataset
@@ -122,9 +140,11 @@ class FusedPoseNet(nn.Module):
         invert,
         ref_extrinsic,
         extrinsic,
+        ref_inv_extrinsic=None,
+        inv_extrinsic=None,
     ):
-        ref_inv_extrinsic = torch.inverse(ref_extrinsic)
-        inv_extrinsic = torch.inverse(extrinsic)
+        ref_inv_extrinsic = torch.inverse(ref_extrinsic) if ref_inv_extrinsic is None else ref_inv_extrinsic
+        inv_extrinsic = torch.inverse(extrinsic) if inv_extrinsic is None else inv_extrinsic
 
         ref_T = self.compute_pose(axis_angle, translation, invert)
         poses = extrinsic @ ref_inv_extrinsic @ ref_T.unsqueeze(1) @ ref_extrinsic @ inv_extrinsic

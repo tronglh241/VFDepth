@@ -79,10 +79,10 @@ class MultiCamLoss(SingleCamLoss):
 
     def compute_pose_con_loss(
         self,
-        ref_prev_to_cur_pose,
-        ref_next_to_cur_pose,
-        cam_prev_to_cur_pose,
-        cam_next_to_cur_pose,
+        ref_cur_to_prev_pose,
+        ref_cur_to_next_pose,
+        cam_cur_to_prev_pose,
+        cam_cur_to_next_pose,
         ref_extrinsic,
         ref_inv_extrinsic,
         cam_extrinsic,
@@ -104,12 +104,12 @@ class MultiCamLoss(SingleCamLoss):
 
         for ref_T, cur_T in zip([
             [
-                ref_prev_to_cur_pose,
-                ref_next_to_cur_pose,
+                ref_cur_to_prev_pose,
+                ref_cur_to_next_pose,
             ],
             [
-                cam_prev_to_cur_pose,
-                cam_next_to_cur_pose,
+                cam_cur_to_prev_pose,
+                cam_cur_to_next_pose,
             ]
         ]):
             cur_T_aligned = ref_ext_inv @ cur_ext @ cur_T @ cur_ext_inv @ ref_ext
