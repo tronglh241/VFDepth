@@ -20,16 +20,17 @@ data:
             - "'right'"
           fovs:
             front: ((-np.pi / 2, np.pi / 2), (-np.pi / 2, np.pi / 2))
-            left: ((-np.pi / 2, np.pi / 2), (-np.pi / 2, np.pi / 180 * 90))
+            left: ((-np.pi / 2, np.pi / 2), (-np.pi / 2, np.pi / 2))
             rear: ((-np.pi / 2, np.pi / 2), (-np.pi / 2, np.pi / 2))
-            right: ((-np.pi / 2, np.pi / 2), (-np.pi / 2, np.pi / 180 * 90))
+            right: ((-np.pi / 2, np.pi / 2), (-np.pi / 2, np.pi / 2))
           image_shape: (640, 400)
           jittering: (0.2, 0.2, 0.2, 0.05)
           ref_extrinsic_idx: 0
           length: 0
       shuffle: True
-      batch_size: 3
+      batch_size: 2
       num_workers: 6
+      pin_memory: True
 
   valid:
     module: torch.utils.data
@@ -50,16 +51,17 @@ data:
             - "'right'"
           fovs:
             front: ((-np.pi / 2, np.pi / 2), (-np.pi / 2, np.pi / 2))
-            left: ((-np.pi / 2, np.pi / 2), (-np.pi / 2, np.pi / 180 * 90))
+            left: ((-np.pi / 2, np.pi / 2), (-np.pi / 2, np.pi / 2))
             rear: ((-np.pi / 2, np.pi / 2), (-np.pi / 2, np.pi / 2))
-            right: ((-np.pi / 2, np.pi / 2), (-np.pi / 2, np.pi / 180 * 90))
+            right: ((-np.pi / 2, np.pi / 2), (-np.pi / 2, np.pi / 2))
           image_shape: (640, 400)
           jittering: (0.0, 0.0, 0.0, 0.0)
           ref_extrinsic_idx: 0
           length: 0
       shuffle: False
-      batch_size: 3
+      batch_size: 2
       num_workers: 6
+      pin_memory: True
 
 model:
   module: models.vf_depth
@@ -88,7 +90,7 @@ loss_computation_wrapper:
         spatio_coeff: 0.03
         spatio_tempo_coeff: 0.1
     max_depth: 80.0
-    min_depth: 1.5
+    min_depth: 0.2
     focal_length_scale: 300.0
     neighbor_cam_indices_map:
       0: [3, 1]
@@ -125,7 +127,7 @@ engine:
     optimizer: optimizer
     loss_fn: loss_fn
     device: "'cuda'"
-    max_epochs: 1000
+    max_epochs: 200
     prepare_batch: prepare_batch
     model_fn: >
       lambda model, x: model(
@@ -177,33 +179,33 @@ metrics:
         kwargs:
           loss_fn: loss_fn
 
-lr_scheduler:
-  module: ignite.handlers.param_scheduler
-  name: ReduceLROnPlateauScheduler
-  kwargs:
-    optimizer: optimizer
-    metric_name: "'total_loss'"
-    mode: "'min'"
-    factor: 0.1
-    patience: 10
-  engine: evaluators.valid
-  event: Events.EPOCH_COMPLETED
+# lr_scheduler:
+#   module: ignite.handlers.param_scheduler
+#   name: ReduceLROnPlateauScheduler
+#   kwargs:
+#     optimizer: optimizer
+#     metric_name: "'total_loss'"
+#     mode: "'min'"
+#     factor: 0.1
+#     patience: 10
+#   engine: evaluators.valid
+#   event: Events.EPOCH_COMPLETED
 
-visualization:
-  module: handlers.visualizer
-  name: Visualizer
-  kwargs:
-    trainer: engine
-    evaluator: evaluators.valid
-    out_dir: "f'output/{experiment_name}/vis'"
-    out_name: "'visualization'"
-    out_resolution: (1286, 1606)  # vinai
-    fps: 2
-    file_ext: "'mp4'"
-    fourcc: "'mp4v'"
-    grid_nrow: 2
-    output_transform: 'lambda x: (x[0][2], x[1][9])'
-    event_name: Events.EPOCH_COMPLETED
+# visualization:
+#   module: handlers.visualizer
+#   name: Visualizer
+#   kwargs:
+#     trainer: engine
+#     evaluator: evaluators.valid
+#     out_dir: "f'output/{experiment_name}/vis'"
+#     out_name: "'visualization'"
+#     out_resolution: (1286, 1606)  # vinai
+#     fps: 2
+#     file_ext: "'mp4'"
+#     fourcc: "'mp4v'"
+#     grid_nrow: 2
+#     output_transform: 'lambda x: (x[0][2], x[1][9])'
+#     event_name: Events.EPOCH_COMPLETED
 
 logging:
   progress_bar:
@@ -297,10 +299,10 @@ checkpoint:
         - "'engine'"
         - "'optimizer'"
         # - "'early_stopping'"
-        - "'lr_scheduler'"
+        # - "'lr_scheduler'"
         - "'checkpoint.best'"
       dirname: "f'checkpoints/{experiment_name}'"
-      n_saved: 1
+      n_saved: 5
       global_step_transform: global_step_from_engine(engine, Events.EPOCH_COMPLETED)
 
   loader:
