@@ -35,7 +35,7 @@ if __name__ == '__main__':
     org_model.load_weights()
     org_model.set_val()
 
-    org_dataset = org_model.train_dataloader().dataset
+    org_dataset = org_model.val_dataloader().dataset
     org_sample = org_dataset[0]
     # # print(org_dataset.dataset.filenames[0])
     # # get nuscenes dataset sample
@@ -107,8 +107,9 @@ if __name__ == '__main__':
             'CAM_BACK_LEFT', 'CAM_BACK_RIGHT', 'CAM_BACK',
         ],
         mask_dir='datasets/masks/nuscenes',
-        token_list_file='datasets/file_lists/nuscenes/mini_train.txt',
+        token_list_file='datasets/file_lists/nuscenes/mini_val.txt',
         image_shape=(640, 352),
+        gen_depth_map=True,
     )
     # print(dataset.token_list[0])
     (
@@ -122,6 +123,7 @@ if __name__ == '__main__':
         org_prev_images,
         org_cur_images,
         org_next_images,
+        depths,
     ) = dataset[0]
     ######################################################
     # sample = dataset.dataset.get('sample', dataset.token_list[idx])
@@ -281,3 +283,4 @@ if __name__ == '__main__':
     print('masks', abs(org_sample['mask'] - org_sample['mask']).max())
     print('intrinsics', abs(org_sample['K', 0] - org_sample['K', 0]).max())
     print('extrinsics', abs(torch.inverse(torch.from_numpy(org_sample['extrinsics'])) - torch.inverse(torch.from_numpy(org_sample['extrinsics']))).max())
+    print('depths', abs(org_sample['depth'] - depths).max())

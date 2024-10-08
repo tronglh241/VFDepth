@@ -1,4 +1,4 @@
-experiment_name: "'test_nuscenes'"
+experiment_name: "'test_nuscenes_tmp'"
 
 data:
   test:
@@ -9,8 +9,8 @@ data:
         module: datasets.nuscenes_dataset
         name: NuScenesDataset
         kwargs:
-          version: "'v1.0-trainval'"
-          dataroot: "'../../datasets/nuscenes'"
+          version: "'v1.0-mini'"
+          dataroot: "'../../datasets/nuscenes_mini'"
           cam_names:
             - "'CAM_FRONT'"
             - "'CAM_FRONT_LEFT'"
@@ -19,12 +19,13 @@ data:
             - "'CAM_BACK_RIGHT'"
             - "'CAM_BACK'"
           verbose: True
-          token_list_file: "'datasets/file_lists/nuscenes/val_vis.txt'"
+          token_list_file: "'datasets/file_lists/nuscenes/mini_val.txt'"
           mask_dir: "'datasets/masks/nuscenes'"
           image_shape: (640, 352)
           jittering: (0.0, 0.0, 0.0, 0.0)
           ref_extrinsic_idx: 0
-          length: 0
+          length: 8
+          gen_depth_map: True
       shuffle: False
       batch_size: 4
       num_workers: 8
@@ -105,43 +106,57 @@ metrics:
         name: Loss
         kwargs:
           loss_fn: loss_fn
+      error:
+        module: metrics.depth_error
+        name: DepthError
+        kwargs:
+          min_eval_depth: 0
+          max_eval_depth: 80
+          compute_true_depth_maps: loss_computation_wrapper.compute_true_depth_maps
+          output_transform: >
+            lambda output: (
+              output[0][2], # depth_maps
+              output[1][10], # gt_true_depth_maps
+              output[1][3], # masks
+              output[1][4], # intrinsics
+            )
 
-visualization:
-  module: handlers.visualizer
-  name: Visualizer
-  kwargs:
-    trainer: engine
-    evaluator: engine
-    out_dir: "f'output/{experiment_name}/vis'"
-    out_name: "'visualization'"
-    out_resolution: (1928, 1414)
-    fps: 2
-    file_ext: "'mp4'"
-    fourcc: "'mp4v'"
-    grid_nrow: 3
-    output_transform: 'lambda x: (x[0][2], x[1][8])'
-    view_renderer: loss_computation_wrapper.view_renderer
+# visualization:
+#   module: handlers.visualizer
+#   name: Visualizer
+#   kwargs:
+#     trainer: engine
+#     evaluator: engine
+#     out_dir: "f'output/{experiment_name}/vis'"
+#     out_name: "'visualization'"
+#     out_resolution: (1928, 1414)
+#     fps: 2
+#     file_ext: "'mp4'"
+#     fourcc: "'mp4v'"
+#     grid_nrow: 3
+#     output_transform: 'lambda x: (x[0][2], x[1][8])'
+#     view_renderer: loss_computation_wrapper.view_renderer
 
-predictor:
-  module: handlers.predictor
-  name: Predictor
-  kwargs:
-    trainer: engine
-    evaluator: engine
-    compute_true_depth_maps: loss_computation_wrapper.compute_true_depth_maps
-    out_dir: "f'output/{experiment_name}/point_clouds'"
-    out_name: "'nuscenes'"
-    depth_limit: 50
-    output_transform: >
-      lambda output: (
-        output[0][2], # depth_maps
-        output[1][8], # images
-        output[1][3], # masks
-        output[1][4], # intrinsics
-        output[1][5], # extrinsics
-        None, # distortions
-        None, # fovs
-      )
+# predictor:
+#   module: handlers.predictor
+#   name: Predictor
+#   kwargs:
+#     trainer: engine
+#     evaluator: engine
+#     compute_true_depth_maps: loss_computation_wrapper.compute_true_depth_maps
+#     out_dir: "f'output/{experiment_name}/point_clouds'"
+#     out_name: "'nuscenes'"
+#     depth_limit: 50
+#     output_transform: >
+#       lambda output: (
+#         output[0][2], # depth_maps
+#         output[1][8], # images
+#         output[1][3], # masks
+#         output[1][4], # intrinsics
+#         output[1][5], # extrinsics
+#         None, # distortions
+#         None, # fovs
+#       )
 
 logging:
   progress_bar:
@@ -152,6 +167,20 @@ logging:
         test: engine
       metric_names:
         - "'total_loss'"
+        - "'abs_rel'"
+        - "'sq_rel'"
+        - "'rmse'"
+        - "'rmse_log'"
+        - "'a1'"
+        - "'a2'"
+        - "'a3'"
+        - "'abs_rel_median'"
+        - "'sq_rel_median'"
+        - "'rmse_median'"
+        - "'rmse_log_median'"
+        - "'a1_median'"
+        - "'a2_median'"
+        - "'a3_median'"
 
   # tensorboard:
   #   module: flame.handlers
