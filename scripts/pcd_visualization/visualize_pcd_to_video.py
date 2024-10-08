@@ -1,13 +1,12 @@
-import numpy as np
 import argparse
 from pathlib import Path
 
 import cv2
+import numpy as np
 import open3d as o3d
 import yaml
 from natsort import natsorted
 from tqdm import tqdm
-import json
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
