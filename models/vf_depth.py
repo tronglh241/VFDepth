@@ -12,6 +12,7 @@ class VFDepth(nn.Module):
         fusion_level: int = 2,
         input_width: int = 640,
         input_height: int = 352,
+        linear_depth: bool = False,
     ):
         super(VFDepth, self).__init__()
         self.pose_net = FusedPoseNet(
@@ -25,6 +26,7 @@ class VFDepth(nn.Module):
             fusion_level=fusion_level,
         )
         self.fusion_level = fusion_level
+        self.linear_depth = linear_depth
 
     def forward(
         self,
@@ -150,12 +152,16 @@ class VFDepth(nn.Module):
         dst_width = dst_width or width
         dst_height = dst_height or height
 
-        min_disp = 1 / max_depth
-        max_disp = 1 / min_depth
-        disp_range = max_disp - min_disp
         depth_maps = depth_maps.view(batch_size * num_cams, channels, height, width)
         depth_maps = F.interpolate(depth_maps, [dst_height, dst_width], mode='bilinear', align_corners=False)
         depth_maps = depth_maps.view(batch_size, num_cams, channels, dst_height, dst_width)
-        disp = min_disp + disp_range * depth_maps
-        depth = 1 / disp
+
+        if not self.linear_depth:
+            min_disp = 1 / max_depth
+            max_disp = 1 / min_depth
+            disp_range = max_disp - min_disp
+            disp = min_disp + disp_range * depth_maps
+            depth = 1 / disp
+        else:
+            depth = (1 - depth_maps) * max_depth
         return depth * intrinsic[:, :, 0:1, 0:1].unsqueeze(3) / focal_length_scale
