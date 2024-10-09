@@ -76,6 +76,7 @@ if __name__ == '__main__':
 
         frame = np.asarray(vis.capture_screen_float_buffer())
         frame = (frame * 255).round().astype(np.uint8)
+        frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
 
         video_writer.write(frame)
 
