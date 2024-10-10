@@ -70,8 +70,6 @@ if __name__ == '__main__':
             intrinsic=intrinsic,
             extrinsic=calib_info[cam_name]['extrinsic'],
             distortion=calib_info[cam_name]['distortion'],
-            eps=1e-8,
-            max_count=10,
         )
 
         src_im_file = (

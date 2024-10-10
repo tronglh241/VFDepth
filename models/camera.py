@@ -221,7 +221,7 @@ class Fisheye(Camera):
         extrinsic: torch.Tensor,
         distortion: torch.Tensor,
         fov: torch.Tensor = None,
-        eps: float = 1e-8,
+        eps: float = 1e-6,
         max_count: int = 10,
     ):
         super(Fisheye, self).__init__(
