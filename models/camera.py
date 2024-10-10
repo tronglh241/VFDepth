@@ -304,6 +304,12 @@ class Fisheye(Camera):
             if torch.all(abs(theta_fix) < self.eps):
                 break
 
+        converged_points = abs(theta_fix) < self.eps
+        valid_points = torch.logical_and(
+            valid_points,
+            converged_points,
+        )
+
         scale = torch.tan(theta) / theta_d
 
         theta_flipped = torch.logical_or(
